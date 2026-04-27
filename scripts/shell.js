@@ -383,6 +383,43 @@ function redact(text) {
   }
 }
 
+// Register the daily-9am notify cron via OpenClaw. Idempotent — if a cron
+// with the same name already exists, it's removed first so we don't accumulate
+// duplicates across re-installs.  Failure is logged + swallowed; cron registration
+// never blocks the consent-agree / init flow.
+//
+// Called in two places:
+//   - consent-agree case (first-time registration after the user opts in)
+//   - init case when already consented (safety net — re-registers if a user
+//     manually deleted the cron, or if a previous install failed silently)
+//
+// Notes:
+//   - Uses --session isolated because OpenClaw rejects --session main without
+//     --system-event ("Main jobs require --system-event").
+//   - No --channel/--to set: defers Telegram wiring to the user, who can run
+//     `openclaw cron edit mapick-notify --channel telegram --to <chat-id>` later.
+function registerNotifyCron() {
+  try {
+    execSync("command -v openclaw", { stdio: "ignore" });
+  } catch {
+    return { registered: false, reason: "openclaw_not_found" };
+  }
+  try {
+    execSync("openclaw cron rm mapick-notify", { stdio: "ignore" });
+  } catch {
+    // No prior cron is fine — fall through and add it.
+  }
+  try {
+    execSync(
+      `openclaw cron add --name mapick-notify --cron "0 9 * * *" --session isolated --message "Run /mapick notify"`,
+      { stdio: "ignore", timeout: 10000 },
+    );
+    return { registered: true };
+  } catch (err) {
+    return { registered: false, reason: err.message || "cron_add_failed" };
+  }
+}
+
 const COMMAND = process.argv[2] || "status";
 const ARGS = process.argv.slice(3);
 
@@ -447,6 +484,16 @@ async function main() {
           // never_used is still approximated via last_modified (real invoke counts aren't available locally).
           never_used: skills.filter((s) => !s.last_modified).length,
         };
+
+        // Safety net: re-register the notify cron on every consented init.
+        // Recovers from cases where the user deleted the cron, the previous
+        // consent-agree call ran before openclaw was installed, or a fresh
+        // host needs to inherit the schedule. registerNotifyCron is idempotent
+        // (cron rm + cron add) so repeated calls are cheap. Skipped when
+        // consent isn't yet given.
+        if (hasConsent(config)) {
+          registerNotifyCron();
+        }
       }
       break;
 
@@ -839,12 +886,17 @@ async function main() {
           writeConfig("consent_agreed_at", now);
           deleteConfig("consent_declined");
           deleteConfig("consent_declined_at");
+          // Register the daily notify cron now that consent is in place.
+          // Failure is non-fatal: consent itself succeeded; the notify cron
+          // can be registered manually later if openclaw is missing.
+          const cronResult = registerNotifyCron();
           result = {
             intent: "privacy:consent-agree",
             version,
             agreedAt: now,
             // consentId confirmed by the backend (so the AI can tell the user "backend recorded it").
             consentId: resp?.consentId ?? null,
+            notifyCron: cronResult,
           };
           break;
         }
