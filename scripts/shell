@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# Mapick universal entry point — Node.js only.
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+if ! command -v node &> /dev/null; then
+  echo '{"error":"runtime_missing","message":"Requires Node.js. Install Node.js to use Mapick."}'
+  exit 1
+fi
+
+exec node "${SCRIPT_DIR}/shell.js" "$@"
