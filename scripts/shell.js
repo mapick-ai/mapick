@@ -186,19 +186,24 @@ async function httpCall(method, endpoint, body = null) {
             error: "network_error",
             message: err ? err.message : "no_status_code",
           });
-        } else if (code === 401) {
-          resolve({ error: "unauthorized", statusCode: 401 });
-        } else if (code === 404) {
-          resolve({ error: "not_found", statusCode: 404 });
-        } else if (code === 429) {
-          resolve({ error: "rate_limit", statusCode: 429 });
         } else if (code >= 400) {
-          // Try to surface backend-shaped error JSON; fall back to raw body.
+          // Pass through backend body for ALL 4xx/5xx, including 401/404/429.
+          // Previously these three had fixed shapes that dropped the backend's
+          // `message` / `hint` / `retryAfterSec` / etc. — so the AI saw a bare
+          // "unauthorized" with no way to tell the user to run consent-agree
+          // (regression of mapickii PR-21).
+          const stableErrors = {
+            401: "unauthorized",
+            404: "not_found",
+            429: "rate_limit",
+          };
+          const errCode = stableErrors[code] || "http_error";
           try {
             const parsed = JSON.parse(data);
-            resolve({ error: "http_error", statusCode: code, ...parsed });
+            // backend body merged into result; statusCode authoritative.
+            resolve({ error: errCode, statusCode: code, ...parsed });
           } catch {
-            resolve({ error: "http_error", statusCode: code, body: data });
+            resolve({ error: errCode, statusCode: code, body: data });
           }
         } else {
           try {
