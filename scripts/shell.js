@@ -969,26 +969,33 @@ async function main() {
       break;
 
     case "event":
-    case "event:track":
-      if (ARGS.length < 2) {
+    case "event:track": {
+      // Always use the local fp; never accept userId from CLI args. The
+      // sibling track commands (recommend:track / clean:track / profile-text)
+      // already work this way. Letting userId flow in from ARGS was a
+      // misleading API surface — the help text actively asked the AI to
+      // supply a userId — and a future-footgun if the backend ever stops
+      // cross-checking the x-device-fp header against body.userId.
+      if (ARGS.length < 1) {
         result = {
           error: "missing_argument",
-          hint: "Usage: event:track <userId> <action> [skillId]",
+          hint: "Usage: event:track <action> [skillId]",
         };
         break;
       }
-      const [userId, actionType, metaSkillId] = ARGS;
+      const [actionType, metaSkillId] = ARGS;
       if (!VALID_EVENT_ACTIONS.includes(actionType)) {
         result = { error: "invalid_action", valid: VALID_EVENT_ACTIONS };
         break;
       }
       result = await httpCall("POST", "/events/track", {
-        userId,
+        userId: fp,
         action: actionType,
         skillId: metaSkillId || null,
       });
       result.intent = "event:track";
       break;
+    }
 
     // First-install diagnostic card aggregation: local skills + (optional) backend top_used / security counts.
     case "summary": {
@@ -1107,7 +1114,7 @@ Commands:
   privacy delete-all --confirm  GDPR erasure
   privacy consent-agree [version]  Record consent
   privacy consent-decline      Decline consent (local-only mode)
-  event:track <userId> <action> [skillId]  Record event
+  event:track <action> [skillId]  Record event (always uses local device fp)
   summary                 First-run diagnostic (local + optional backend)
   profile set "<text>"    Save user workflow self-description
   profile get             Read cached workflow profile
