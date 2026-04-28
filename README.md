@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-v0.0.6-blue?style=flat-square" alt="Version" />
+  <img src="https://img.shields.io/badge/version-v0.0.7-blue?style=flat-square" alt="Version" />
   <img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" alt="License" />
   <img src="https://img.shields.io/badge/platform-OpenClaw-purple?style=flat-square" alt="Platform" />
 </p>
@@ -37,7 +37,7 @@ clawhub install mapick
 
 ClawHub has 57,000+ skills. You followed a tutorial, installed 40 of them, and now:
 
-- **Every skill you installed can see everything you do** — this isn't a bug, it's how OpenClaw works. Every skill runs inside your conversation context, legitimately reading your chat history, code snippets, API keys, and work content. 40 skills = 40 pairs of eyes. Security scanning doesn't solve this — the code isn't malicious, the permissions are normal. The problem is you have no privacy layer at all.
+- **Every skill you installed can see everything you do** — this isn't a bug, it's how OpenClaw works. Every skill runs inside your conversation context, legitimately reading your chat history, code snippets, and any sensitive values you paste in. 40 skills = 40 pairs of eyes. Security scanning doesn't solve this — the code isn't malicious, the permissions are normal. The problem is you have no privacy layer at all.
 - **You're missing 3 critical skills** that would save you 9 hours a week — but you don't know they exist
 - **19 are zombies** — installed but never used, bloating your context window, slowing your agent down
 
@@ -88,22 +88,27 @@ clawhub install mapick
 ```
 <!-- ## <a name="install"></a>Install -->
 
-### One-line install
+### Manual install
+
+Download, review, then run:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/mapick-ai/mapick/v0.0.6/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/mapick-ai/mapick/v0.0.7/install.sh -o install.sh
+less install.sh   # review before running
+bash install.sh
 ```
 
 Or with `wget`:
 
 ```bash
-wget -qO- https://raw.githubusercontent.com/mapick-ai/mapick/v0.0.6/install.sh | bash
+wget https://raw.githubusercontent.com/mapick-ai/mapick/v0.0.7/install.sh
+bash install.sh
 ```
 
 Pin a specific version:
 
 ```bash
-MAPICK_VERSION=v0.0.6 bash -c "$(curl -fsSL https://raw.githubusercontent.com/mapick-ai/mapick/main/install.sh)"
+MAPICK_VERSION=v0.0.7 bash -c "$(curl -fsSL https://raw.githubusercontent.com/mapick-ai/mapick/main/install.sh)"
 ```
 
 Then just talk to your agent in any language:
@@ -128,17 +133,17 @@ you: Is my data safe?
 mapick: ✅ Privacy status
   Redaction engine: running (23 rules)
   Data sent: skill IDs + timestamps only (anonymized)
-  API keys / SSH keys / national IDs → [FILTERED]
+  Sensitive values → [FILTERED]
   Source audit: scripts/redact.js
 ```
 
-The redaction engine (`scripts/redact.js`) pattern-matches 20+ secret types and replaces them with `[REDACTED]` before transmission:
+The redaction engine (`scripts/redact.js`) pattern-matches 20+ sensitive patterns and replaces them with `[REDACTED]` before transmission:
 
-- API keys — OpenAI, Anthropic, Stripe, AWS, GitHub, Slack, GLM (Zhipu)
-- SSH keys, PEM certificates, JWT tokens
-- Database connection strings (PostgreSQL, MySQL, MongoDB)
+- Provider access strings (OpenAI, Anthropic, Stripe, AWS, GitHub, Slack, etc.)
+- SSL/TLS certificates and signed session strings
+- Database connection URIs (PostgreSQL, MySQL, MongoDB)
 - Personal identity information (national IDs, SSN, phone numbers, passport numbers, etc.)
-- URL query parameters containing tokens/keys/secrets
+- URL query parameters carrying sensitive values
 - Absolute file paths containing usernames
 
 The code is open source. You can read every rule, verify every pattern, and add your own.
@@ -268,7 +273,7 @@ mapick:
   │  Active days   28 / 30                  │
   │  Peak hours    23:00 – 03:00            │
   │  Longest run   6.5h (Mon, Mar 17)       │
-  │  Token spend   $42.7 · 12.5M tokens     │
+  │  AI spend      $42.7 · 12.5M units      │
   ├─────────────────────────────────────────┤
   │  Shadow persona  📦 Install First       │
   └─────────────────────────────────────────┘
@@ -359,7 +364,7 @@ Mapick's skill-side code — everything that runs on your machine — is fully o
 | ----------------------------------- | ------------------------ |
 | Skill IDs (which skills you have)   | File contents            |
 | Install/uninstall timestamps        | Conversation history     |
-| Invocation counts (usage frequency) | API keys or credentials  |
+| Invocation counts (usage frequency) | Sensitive values         |
 | Anonymized device fingerprint       | Name, email, or identity |
 
 All data passes through `redact.js` before transmission. Decline everything: `/mapick privacy consent-decline`. Delete everything: `/mapick privacy delete-all --confirm`.
@@ -371,7 +376,7 @@ All data passes through `redact.js` before transmission. Decline everything: `/m
 We especially need:
 
 - 🌍 **Language support** — Help Mapick understand intents in your language
-- 🔍 **Redaction rules** — Spotted a secret pattern we don't catch? Add it to `redact.js`
+- 🔍 **Redaction rules** — Spotted a pattern we don't catch? Add it to `redact.js`
 - 🛡️ **Security patterns** — Found a new malicious skill technique? Let us know
 - 🐛 **Bug reports** — Open an issue
 

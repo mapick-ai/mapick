@@ -1,14 +1,17 @@
 #!/usr/bin/env bash
 # Mapick Skill — Install Script (V1: OpenClaw only)
 #
-# Install or update Mapick Skill with a single command:
+# Recommended install path is `clawhub install mapick`. This script is for
+# recovery, CI, pinned versions, or environments without ClawHub access.
+# Always review the script before running it:
 #
-#   curl -fsSL https://raw.githubusercontent.com/mapick-ai/mapick/v0.0.6/install.sh | bash
-#   wget -qO- https://raw.githubusercontent.com/mapick-ai/mapick/v0.0.6/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/mapick-ai/mapick/v0.0.7/install.sh -o install.sh
+#   less install.sh
+#   bash install.sh
 #
 # Options (via environment variables):
-#   MAPICK_VERSION=v0.0.6  bash -c "$(curl -fsSL ...)"   # Install specific version
-#   MAPICK_REPO=owner/repo bash -c "$(curl -fsSL ...)"   # Override source repo
+#   MAPICK_VERSION=v0.0.7  ./install.sh   # Install specific version
+#   MAPICK_REPO=owner/repo ./install.sh   # Override source repo
 
 set -e
 

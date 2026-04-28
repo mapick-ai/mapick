@@ -1,24 +1,31 @@
 #!/usr/bin/env node
-/**
- * Mapick skill unified entry point (Node.js)
- * Usage: node shell.js <command> [args...]
- */
+// Mapick skill entry point. Usage: node shell.js <command> [args...]
 
 const fs = require("fs");
 const path = require("path");
-const crypto = require("crypto");
 const https = require("https");
 const os = require("os");
 const { execSync } = require("child_process");
+
+// Anonymous device fingerprint hash — not for auth.
+function stableHash16(input) {
+  let h1 = 0x811c9dc5 >>> 0;
+  let h2 = 0x84222325 >>> 0;
+  for (let i = 0; i < input.length; i++) {
+    const c = input.charCodeAt(i);
+    h1 = Math.imul((h1 ^ c) >>> 0, 0x01000193) >>> 0;
+    h2 = Math.imul((h2 ^ c ^ (i + 1)) >>> 0, 0x01000193) >>> 0;
+  }
+  const hex = (n) => (n >>> 0).toString(16).padStart(8, "0");
+  return hex(h1) + hex(h2);
+}
 
 const CONFIG_DIR = path.dirname(__dirname);
 const CONFIG_FILE = path.join(CONFIG_DIR, "CONFIG.md");
 const TRASH_DIR = path.join(CONFIG_DIR, "trash");
 const REDACTJS_PATH = path.join(CONFIG_DIR, "redact.js");
 const API_BASE = "https://api.mapick.ai/api/v1";
-// Detect the skills install directory: openclaw / claude / codex live in different paths per platform.
-// Priority: env override -> ~/.openclaw -> ~/.claude -> ~/.codex; falls back to .openclaw if none exist.
-// Default candidate is created on first install.
+// Priority: env override → ~/.openclaw → ~/.claude → ~/.codex.
 function detectSkillsBase() {
   const home = os.homedir();
   const candidates = [
@@ -35,50 +42,39 @@ function detectSkillsBase() {
 }
 const SKILLS_BASE = detectSkillsBase();
 const CACHE_DIR = path.join(os.homedir(), ".mapick", "cache");
+const OUT_ARR = parseInt(process.env.MAPICK_OUTPUT_ARRAY_LIMIT || "10", 10);
+const OUT_STR = parseInt(process.env.MAPICK_OUTPUT_STRING_LIMIT || "4000", 10);
+const SCAN_LIMIT = parseInt(process.env.MAPICK_SCAN_LIMIT || "50", 10);
 
-const VALID_TRACK_ACTIONS = [
-  "shown",
-  "click",
-  "install",
-  "installed",
-  "ignore",
-  "not_interested",
-];
-const VALID_EVENT_ACTIONS = [
-  "skill_install",
-  "skill_invoke",
-  "skill_idle",
-  "skill_uninstall",
-  "rec_shown",
-  "rec_click",
-  "rec_ignore",
-  "rec_installed",
-  "sequence_pattern",
-];
+// Output limiter: caps any array to OUT_ARR items and any string to OUT_STR
+// chars. Prevents Mapick from dumping huge backend responses into the AI's
+// context window.
+function clampOutput(obj, depth = 0) {
+  if (depth > 6) return "[deep]";
+  if (Array.isArray(obj)) {
+    const truncated = obj.length > OUT_ARR;
+    const out = obj.slice(0, OUT_ARR).map((x) => clampOutput(x, depth + 1));
+    if (truncated) out.push(`__truncated__${obj.length - OUT_ARR}_more__`);
+    return out;
+  }
+  if (typeof obj === "string" && obj.length > OUT_STR) return obj.slice(0, OUT_STR) + "…";
+  if (obj && typeof obj === "object") {
+    const out = {};
+    for (const [k, v] of Object.entries(obj)) out[k] = clampOutput(v, depth + 1);
+    return out;
+  }
+  return obj;
+}
+
+const VALID_TRACK_ACTIONS = ["shown", "click", "install", "installed", "ignore", "not_interested"];
+const VALID_EVENT_ACTIONS = ["skill_install", "skill_invoke", "skill_idle", "skill_uninstall", "rec_shown", "rec_click", "rec_ignore", "rec_installed", "sequence_pattern"];
 const PROTECTED_SKILLS = ["mapick", "tasa"];
-const REMOTE_COMMANDS = new Set([
-  "recommend",
-  "recommend:track",
-  "search",
-  "workflow",
-  "daily",
-  "weekly",
-  "report",
-  "security",
-  "security:report",
-  "clean",
-  "clean:track",
-  "share",
-]);
+const REMOTE_COMMANDS = new Set(["recommend", "recommend:track", "search", "workflow", "daily", "weekly", "report", "security", "security:report", "clean", "clean:track", "share"]);
 
 function deviceFp() {
   const config = readConfig();
   if (config.device_fp) return config.device_fp;
-  const fp = crypto
-    .createHash("sha256")
-    .update(`${os.hostname()}|${os.platform()}|${os.homedir()}`)
-    .digest("hex")
-    .slice(0, 16);
+  const fp = stableHash16(`${os.hostname()}|${os.platform()}|${os.homedir()}`);
   writeConfig("device_fp", fp);
   return fp;
 }
@@ -137,23 +133,15 @@ function writeCache(key, data, ttlHours = 24) {
   fs.writeFileSync(path.join(CACHE_DIR, `${key}.json`), JSON.stringify(data));
 }
 
-// Backend HTTP client. Uses `curl` (system binary, already required in SKILL.md
-// frontmatter) instead of Node's `https.request`.
-//
-// Why curl: Node 24 + macOS keychain interaction is flaky — `https.request`
-// throws UNABLE_TO_VERIFY_LEAF_SIGNATURE for valid TLS endpoints because Node's
-// bundled CA store doesn't include intermediate certs that the system keychain
-// trusts. `--use-system-ca` is supposed to bridge this but doesn't reliably work
-// on macOS in 24.x. curl uses the OS trust store directly and "just works",
-// keeping mapick installs functional regardless of the user's Node version.
+// Use curl, not https.request: Node 24 on macOS throws
+// UNABLE_TO_VERIFY_LEAF_SIGNATURE because bundled CAs miss intermediates the
+// system keychain trusts; `--use-system-ca` is unreliable in 24.x.
 async function httpCall(method, endpoint, body = null) {
   const base = API_BASE.replace(/\/$/, "") + "/";
   const url = new URL(endpoint.replace(/^\//, ""), base);
   const STATUS_DELIM = "___MAPICK_HTTP_STATUS___";
 
-  // -s silent, -S still show errors, -L follow redirects, -m timeout.
-  // Append %{http_code} after a unique delimiter so we can split the body
-  // from the status code without worrying about embedded newlines in JSON.
+  // %{http_code} after a unique delimiter so JSON newlines don't confuse parsing.
   const args = [
     "-sSL",
     "-X", method,
@@ -193,7 +181,6 @@ async function httpCall(method, endpoint, body = null) {
         } else if (code === 429) {
           resolve({ error: "rate_limit", statusCode: 429 });
         } else if (code >= 400) {
-          // Try to surface backend-shaped error JSON; fall back to raw body.
           try {
             const parsed = JSON.parse(data);
             resolve({ error: "http_error", statusCode: code, ...parsed });
@@ -209,15 +196,20 @@ async function httpCall(method, endpoint, body = null) {
         }
       },
     );
-    // execFile doesn't pipe stdin by default; we passed body via -d already.
     cp.on("error", (e) =>
       resolve({ error: "network_error", message: e.message }),
     );
   });
 }
 
-// Lightweight frontmatter parser: reads the first ---...--- block as flat key:value (no nesting).
-// Parses booleans and strips quotes; everything else stays as a string. Sufficient for simple fields like enabled/disabled.
+async function apiCall(method, endpoint, body, intent) {
+  const r = await httpCall(method, endpoint, body);
+  if (intent) r.intent = intent;
+  return r;
+}
+
+const missingArg = (hint) => ({ error: "missing_argument", hint });
+
 function parseFrontmatter(content) {
   const m = content.match(/^---\s*\n([\s\S]*?)\n---/);
   if (!m) return {};
@@ -250,7 +242,6 @@ function scanSkills() {
         path: skillPath,
         installed_at: fs.statSync(skillPath).birthtime.toISOString(),
         last_modified: fs.statSync(skillFile).mtime.toISOString(),
-        // Enabled by default; only marked false when frontmatter explicitly sets disabled: true.
         enabled: fm.disabled !== true,
       });
     }
@@ -274,11 +265,7 @@ function isoNow() {
   return new Date().toISOString();
 }
 
-// Counts rules in redact.js (used by the summary card's "X rules active" hint).
-// Simple algorithm: scan the source for `[/` at the start of a line — one per RULES tuple. Auto-follows redact.js changes.
-// Candidate paths:
-//   - REDACTJS_PATH (CONFIG_DIR/redact.js): legacy path, may land at mapick/redact.js
-//   - __dirname/redact.js: scripts/redact.js next to shell.js (the actual location)
+// Counts `[/` at line start — one per RULES tuple. Auto-follows redact.js changes.
 function countRedactRules() {
   const candidates = [REDACTJS_PATH, path.join(__dirname, "redact.js")];
   for (const file of candidates) {
@@ -287,16 +274,12 @@ function countRedactRules() {
       const content = fs.readFileSync(file, "utf8");
       const matches = content.match(/^\s*\[\//gm);
       if (matches && matches.length > 0) return matches.length;
-    } catch {
-      /* try next */
-    }
+    } catch {}
   }
   return 0;
 }
 
-// Extract profile keywords: English words + whole CJK phrases. Drops stopwords, dedups, lowercases.
-// Input "Backend, Go + K8s, reading logs" -> ["backend","go","k8s","reading","logs"].
-// CJK input keeps the whole phrase between separators (no word segmentation).
+// CJK runs are kept whole between separators (no word segmentation).
 function extractProfileTags(text) {
   if (!text) return [];
   const STOPWORDS = new Set([
@@ -304,17 +287,14 @@ function extractProfileTags(text) {
     "is", "are", "do", "does", "doing", "use", "using", "uses",
     "和", "或", "的", "是", "在", "我", "你", "用", "做",
   ]);
-  // Split on whitespace + punctuation (ASCII and CJK); CJK runs are preserved as single tokens.
-  const tokens = text
+  const words = text
     .toLowerCase()
     .split(/[\s,，.。、；;:!?！？()（）{}\[\]【】"'`+]+/u)
     .map((t) => t.trim())
     .filter((t) => t.length >= 2 && !STOPWORDS.has(t));
-  return [...new Set(tokens)];
+  return [...new Set(words)];
 }
 
-// Aggregate summary: local skills + optional backend status (top_used / security counts).
-// When backend is unavailable (no consent or network failure), returns only the local part with has_backend=false.
 async function aggregateSummary(skills, config) {
   const zombieDays = parseInt(process.env.MAPICK_ZOMBIE_DAYS || "30", 10);
   const now = Date.now();
@@ -329,7 +309,7 @@ async function aggregateSummary(skills, config) {
   const neverUsed = skills.filter(
     (s) => s.installed_at && s.last_modified === s.installed_at,
   ).length;
-  // Rough context-cost estimate: ~2% per zombie, capped at 60% (V1 placeholder; replace with real ratio once backend is stable).
+  // V1 placeholder: ~2%/zombie capped at 60%. Replace with real ratio later.
   const contextWastePct = Math.min(60, zombies.length * 2);
 
   const summary = {
@@ -348,19 +328,19 @@ async function aggregateSummary(skills, config) {
     has_backend: false,
   };
 
-  // Backend enrichment: top_used + security A/B/C counts. Skipped entirely without consent.
+  // Backend enrichment skipped without consent.
   if (!hasConsent(config) || isConsentDeclined(config)) return summary;
 
   const fp = deviceFp();
   try {
-    const status = await httpCall("GET", `/assistant/status/${fp}`);
+    const status = await httpCall("GET", `/assistant/status/${fp}?compact=1`);
     if (status && !status.error) {
       summary.has_backend = true;
       if (Array.isArray(status.top_used)) summary.top_used = status.top_used;
       if (status.security) summary.security = status.security;
     }
   } catch {
-    /* graceful degrade — local data is still returned */
+    // graceful degrade — local data is still returned
   }
   return summary;
 }
@@ -412,21 +392,8 @@ function redact(text) {
   }
 }
 
-// Register the daily-9am notify cron via OpenClaw. Idempotent — if a cron
-// with the same name already exists, it's removed first so we don't accumulate
-// duplicates across re-installs.  Failure is logged + swallowed; cron registration
-// never blocks the consent-agree / init flow.
-//
-// Called in two places:
-//   - consent-agree case (first-time registration after the user opts in)
-//   - init case when already consented (safety net — re-registers if a user
-//     manually deleted the cron, or if a previous install failed silently)
-//
-// Notes:
-//   - Uses --session isolated because OpenClaw rejects --session main without
-//     --system-event ("Main jobs require --system-event").
-//   - No --channel/--to set: defers Telegram wiring to the user, who can run
-//     `openclaw cron edit mapick-notify --channel telegram --to <chat-id>` later.
+// Idempotent (cron rm + cron add). `--session isolated` is required:
+// OpenClaw rejects `--session main` without `--system-event`.
 function registerNotifyCron() {
   try {
     execSync("command -v openclaw", { stdio: "ignore" });
@@ -435,9 +402,7 @@ function registerNotifyCron() {
   }
   try {
     execSync("openclaw cron rm mapick-notify", { stdio: "ignore" });
-  } catch {
-    // No prior cron is fine — fall through and add it.
-  }
+  } catch {}
   try {
     execSync(
       `openclaw cron add --name mapick-notify --cron "0 9 * * *" --session isolated --message "Run /mapick notify"`,
@@ -487,8 +452,6 @@ async function main() {
           privacy: "Anonymous by design. No registration.",
         };
       } else {
-        // Compute zombie / activation_rate / never_used for real, replacing the previous hardcoded 0/binary fallback.
-        // Source is local mtime + frontmatter; the backend's invokeCount cron is a separate, more precise dataset.
         const zombieDays = parseInt(
           process.env.MAPICK_ZOMBIE_DAYS || "30",
           10,
@@ -499,7 +462,6 @@ async function main() {
 
         const zombies = skills.filter((s) => ageDays(s) > zombieDays);
         const total = skills.length;
-        // active = enabled AND not a zombie; excludes both explicitly disabled and long-untouched skills.
         const active = skills.filter(
           (s) => s.enabled && ageDays(s) <= zombieDays,
         ).length;
@@ -510,16 +472,11 @@ async function main() {
           activation_rate:
             total > 0 ? `${Math.round((active / total) * 100)}%` : "0%",
           zombie_count: zombies.length,
-          // never_used is still approximated via last_modified (real invoke counts aren't available locally).
           never_used: skills.filter((s) => !s.last_modified).length,
         };
 
-        // Safety net: re-register the notify cron on every consented init.
-        // Recovers from cases where the user deleted the cron, the previous
-        // consent-agree call ran before openclaw was installed, or a fresh
-        // host needs to inherit the schedule. registerNotifyCron is idempotent
-        // (cron rm + cron add) so repeated calls are cheap. Skipped when
-        // consent isn't yet given.
+        // Safety-net re-register: recovers from manual cron deletion / prior
+        // install racing openclaw. registerNotifyCron is idempotent.
         if (hasConsent(config)) {
           registerNotifyCron();
         }
@@ -532,13 +489,12 @@ async function main() {
       break;
 
     case "recommend": {
-      // --with-profile: append user_profile_tags from CONFIG.md to the query so the backend can boost results.
       const withProfile = ARGS.includes("--with-profile");
       const numericArgs = ARGS.filter((a) => !a.startsWith("--"));
       const limit = parseInt(numericArgs[0]) || 5;
       const cacheKey = `recommend_${fp}`;
       const cached = readCache(cacheKey);
-      // An explicit limit or --with-profile always hits the backend, bypassing the 24h cache.
+      // Explicit limit or --with-profile bypasses the 24h cache.
       const useCache = !withProfile && numericArgs.length === 0;
       if (useCache && cached) {
         result = { intent: "recommend", items: cached.items, cached: true };
@@ -546,7 +502,7 @@ async function main() {
         let url = `/recommendations/feed?limit=${limit}`;
         if (withProfile) {
           const tagsRaw = config.user_profile_tags || "";
-          // CONFIG stores a JSON array string; on parse failure, fall back to comma-separated.
+          // JSON array string; on parse failure, fall back to comma-separated.
           let tags = [];
           try {
             tags = JSON.parse(tagsRaw);
@@ -574,10 +530,7 @@ async function main() {
 
     case "recommend:track":
       if (ARGS.length < 3) {
-        result = {
-          error: "missing_argument",
-          hint: "Usage: recommend:track <recId> <skillId> <action>",
-        };
+        result = missingArg("Usage: recommend:track <recId> <skillId> <action>");
         break;
       }
       const [recId, skillId, action] = ARGS;
@@ -585,13 +538,7 @@ async function main() {
         result = { error: "invalid_action", valid: VALID_TRACK_ACTIONS };
         break;
       }
-      result = await httpCall("POST", "/recommendations/track", {
-        recId,
-        skillId,
-        action,
-        userId: fp,
-      });
-      result.intent = "recommend:track";
+      result = await apiCall("POST", "/recommendations/track", { recId, skillId, action, userId: fp }, "recommend:track");
       break;
 
     case "search":
@@ -621,32 +568,28 @@ async function main() {
       break;
 
     case "clean":
-      const cleanResp = await httpCall("GET", `/users/${fp}/zombies`);
+      const cleanResp = await httpCall("GET", `/users/${fp}/zombies?limit=${OUT_ARR}`);
       result = {
         intent: "clean",
         zombies: cleanResp.zombies || cleanResp || [],
       };
       break;
 
-    // PR-26 → PR-27 simplified: single GET /notify/daily-check call. Backend
-    // handles version comparison (cached GitHub fetch), zombies fetch, and
-    // lastActiveAt bump in one shot. Output: { intent:"notify", alerts, checkedAt }.
-    // Empty alerts ⇒ SKILL.md instructs the AI to stay silent ⇒ OpenClaw
-    // delivers nothing.
+    // Single GET /notify/daily-check; backend handles version cmp + zombies + activity bump.
     case "notify": {
       const versionFile = path.join(CONFIG_DIR, ".version");
       let installedVer = "";
       try {
         installedVer = fs.readFileSync(versionFile, "utf8").trim();
       } catch {}
-      // Always send `repo` so the backend can fetch our own release stream
-      // (the endpoint maintains a per-repo allowlist; mapick-ai/mapick is the
-      // identifier for this Skill). Without it the backend returns alerts: [].
+      // Backend has a per-repo allowlist; without `repo` it returns alerts: [].
       const params = new URLSearchParams();
       if (installedVer) params.set("currentVersion", installedVer);
       params.set("repo", "mapick-ai/mapick");
+      params.set("compact", "1");
+      params.set("limit", String(OUT_ARR));
       const resp = await httpCall("GET", `/notify/daily-check?${params}`);
-      // Backend or network failure → silent empty alerts (silence-first).
+      // Silence-first: backend/network failure → empty alerts.
       if (resp.error) {
         result = { intent: "notify", alerts: [] };
       } else {
@@ -657,27 +600,20 @@ async function main() {
 
     case "clean:track":
       if (ARGS.length < 1) {
-        result = {
-          error: "missing_argument",
-          hint: "Usage: clean:track <skillId>",
-        };
+        result = missingArg("Usage: clean:track <skillId>");
         break;
       }
-      result = await httpCall("POST", "/events/track", {
+      result = await apiCall("POST", "/events/track", {
         userId: fp,
         skillId: ARGS[0],
         action: "skill_uninstall",
         metadata: { reason: "zombie_cleanup" },
-      });
-      result.intent = "clean:track";
+      }, "clean:track");
       break;
 
     case "uninstall":
       if (ARGS.length < 1) {
-        result = {
-          error: "missing_argument",
-          hint: "Usage: uninstall <skillId> [--confirm]",
-        };
+        result = missingArg("Usage: uninstall <skillId> [--confirm]");
         break;
       }
       const targetId = ARGS[0];
@@ -708,45 +644,34 @@ async function main() {
       break;
 
     case "workflow":
-      result = await httpCall("GET", `/assistant/workflow/${fp}`);
-      result.intent = "workflow";
+      result = await apiCall("GET", `/assistant/workflow/${fp}?compact=1`, null, "workflow");
       break;
 
     case "daily":
-      result = await httpCall("GET", `/assistant/daily-digest/${fp}`);
-      result.intent = "daily";
+      result = await apiCall("GET", `/assistant/daily-digest/${fp}?compact=1`, null, "daily");
       break;
 
     case "weekly":
-      result = await httpCall("GET", `/assistant/weekly/${fp}`);
-      result.intent = "weekly";
+      result = await apiCall("GET", `/assistant/weekly/${fp}?compact=1`, null, "weekly");
       break;
 
     case "bundle":
       if (ARGS[0] === "recommend") {
-        result = await httpCall("GET", "/bundle/recommend/list");
-        result.intent = "bundle:recommend";
+        result = await apiCall("GET", `/bundle/recommend/list?limit=${OUT_ARR}`, null, "bundle:recommend");
       } else if (ARGS[0] === "install" && ARGS[1]) {
-        result = await httpCall("GET", `/bundle/${ARGS[1]}/install`);
-        result.intent = "bundle:install";
+        result = await apiCall("GET", `/bundle/${ARGS[1]}/install`, null, "bundle:install");
         result.bundleId = ARGS[1];
       } else if (ARGS[0] === "track-installed" && ARGS[1]) {
-        result = await httpCall("POST", "/bundle/seed", {
-          bundleId: ARGS[1],
-          userId: fp,
-        });
-        result.intent = "bundle:track-installed";
+        result = await apiCall("POST", "/bundle/seed", { bundleId: ARGS[1], userId: fp }, "bundle:track-installed");
       } else if (ARGS[0]) {
-        result = await httpCall("GET", `/bundle/${ARGS[0]}`);
-        result.intent = "bundle:detail";
+        result = await apiCall("GET", `/bundle/${ARGS[0]}`, null, "bundle:detail");
       } else {
-        result = await httpCall("GET", "/bundle");
-        result.intent = "bundle";
+        result = await apiCall("GET", `/bundle?limit=${OUT_ARR}`, null, "bundle");
       }
       break;
 
     case "report":
-      const reportResp = await httpCall("GET", `/report/persona`);
+      const reportResp = await httpCall("GET", `/report/persona?compact=1`);
       result = { intent: "report", ...reportResp };
       if (
         result.status === "brewing" ||
@@ -761,10 +686,7 @@ async function main() {
 
     case "share":
       if (ARGS.length < 2) {
-        result = {
-          error: "missing_argument",
-          hint: "Usage: share <reportId> <htmlFile>",
-        };
+        result = missingArg("Usage: share <reportId> <htmlFile>");
         break;
       }
       const [reportId, htmlFile] = ARGS;
@@ -773,39 +695,30 @@ async function main() {
         break;
       }
       const htmlContent = redact(fs.readFileSync(htmlFile, "utf8"));
-      result = await httpCall("POST", "/share/upload", {
+      result = await apiCall("POST", "/share/upload", {
         reportId,
         html: htmlContent,
         locale: ARGS[2] || "en",
-      });
-      result.intent = "share";
+      }, "share");
       break;
 
     case "security":
       if (ARGS.length < 1) {
-        result = {
-          error: "missing_argument",
-          hint: "Usage: security <skillId>",
-        };
+        result = missingArg("Usage: security <skillId>");
         break;
       }
-      result = await httpCall("GET", `/skill/${ARGS[0]}/security`);
-      result.intent = "security";
+      result = await apiCall("GET", `/skill/${ARGS[0]}/security`, null, "security");
       break;
 
     case "security:report":
       if (ARGS.length < 3) {
-        result = {
-          error: "missing_argument",
-          hint: "Usage: security:report <skillId> <reason> <evidence>",
-        };
+        result = missingArg("Usage: security:report <skillId> <reason> <evidence>");
         break;
       }
-      result = await httpCall("POST", `/skill/${ARGS[0]}/report`, {
+      result = await apiCall("POST", `/skill/${ARGS[0]}/report`, {
         reason: ARGS[1],
         evidenceEn: ARGS[2],
-      });
-      result.intent = "security:report";
+      }, "security:report");
       break;
 
     case "privacy":
@@ -832,18 +745,14 @@ async function main() {
 
         case "trust":
           if (ARGS.length < 2) {
-            result = {
-              error: "missing_argument",
-              hint: "Usage: privacy trust <skillId>",
-            };
+            result = missingArg("Usage: privacy trust <skillId>");
             break;
           }
-          result = await httpCall("POST", "/users/trusted-skills", {
+          result = await apiCall("POST", "/users/trusted-skills", {
             userId: fp,
             skillId: ARGS[1],
             permission: "unredacted",
-          });
-          result.intent = "privacy:trust";
+          }, "privacy:trust");
           const trusted = config.trusted_skills
             ? config.trusted_skills.split(",")
             : [];
@@ -853,10 +762,7 @@ async function main() {
 
         case "untrust":
           if (ARGS.length < 2) {
-            result = {
-              error: "missing_argument",
-              hint: "Usage: privacy untrust <skillId>",
-            };
+            result = missingArg("Usage: privacy untrust <skillId>");
             break;
           }
           const untrusted = (
@@ -892,10 +798,8 @@ async function main() {
           break;
 
         case "consent-agree": {
-          // PR-21: previously the httpCall return value was discarded — when the POST failed, CONFIG
-          // was still written as "agreed". Result: no row in user_consents, and later ConsentGuard
-          // calls still 403'd. Now we only write local state on a successful POST; on failure we
-          // surface the backend error so the AI can report reality instead of falsely showing "agreed".
+          // Only write local state on backend success — otherwise local "agreed"
+          // would diverge from server, leaving later ConsentGuard calls 403ing.
           const version = ARGS[1] || "1.0";
           const now = isoNow();
           const resp = await httpCall("POST", "/users/consent", {
@@ -903,7 +807,6 @@ async function main() {
             agreedAt: now,
           });
           if (resp && resp.error) {
-            // Skip the local write — keep the "not agreed" state aligned with the backend.
             result = {
               intent: "privacy:consent-agree",
               error: "backend_consent_failed",
@@ -918,15 +821,12 @@ async function main() {
           writeConfig("consent_agreed_at", now);
           deleteConfig("consent_declined");
           deleteConfig("consent_declined_at");
-          // Register the daily notify cron now that consent is in place.
-          // Failure is non-fatal: consent itself succeeded; the notify cron
-          // can be registered manually later if openclaw is missing.
+          // Cron failure is non-fatal — consent itself already succeeded.
           const cronResult = registerNotifyCron();
           result = {
             intent: "privacy:consent-agree",
             version,
             agreedAt: now,
-            // consentId confirmed by the backend (so the AI can tell the user "backend recorded it").
             consentId: resp?.consentId ?? null,
             notifyCron: cronResult,
           };
@@ -971,10 +871,7 @@ async function main() {
     case "event":
     case "event:track":
       if (ARGS.length < 2) {
-        result = {
-          error: "missing_argument",
-          hint: "Usage: event:track <userId> <action> [skillId]",
-        };
+        result = missingArg("Usage: event:track <userId> <action> [skillId]");
         break;
       }
       const [userId, actionType, metaSkillId] = ARGS;
@@ -982,43 +879,34 @@ async function main() {
         result = { error: "invalid_action", valid: VALID_EVENT_ACTIONS };
         break;
       }
-      result = await httpCall("POST", "/events/track", {
+      result = await apiCall("POST", "/events/track", {
         userId,
         action: actionType,
         skillId: metaSkillId || null,
-      });
-      result.intent = "event:track";
+      }, "event:track");
       break;
 
-    // First-install diagnostic card aggregation: local skills + (optional) backend top_used / security counts.
     case "summary": {
       const skills = scanSkills();
       result = await aggregateSummary(skills, config);
       break;
     }
 
-    // User workflow self-description: profile set/get/clear. `set` also async-uploads extracted tags to the backend (when consent is given).
     case "profile": {
       const subCmd = ARGS[0] || "get";
       switch (subCmd) {
         case "set": {
           const text = ARGS.slice(1).join(" ").trim();
           if (!text) {
-            result = {
-              error: "missing_argument",
-              hint: "Usage: profile set \"<workflow text>\"",
-            };
+            result = missingArg("Usage: profile set \"<workflow text>\"");
             break;
           }
           const tags = extractProfileTags(text);
           writeConfig("user_profile", text);
           writeConfig("user_profile_tags", JSON.stringify(tags));
           writeConfig("user_profile_set_at", isoNow());
-          // When consent is given, upload the profile so recommendations can boost; failures don't block local writes.
-          // The backend endpoint is POST /users/:userId/profile-text, body contains only
-          // profileText + profileTags (userId is in the path). Previously the path was wrongly
-          // /users/profile and always 404'd — local writes succeeded but the backend never received
-          // profileTags, so the --with-profile boost on recommend was always 0.
+          // POST /users/:userId/profile-text — userId in path. Local writes
+          // never block on upload failure.
           let uploaded = false;
           if (hasConsent(config) && !isConsentDeclined(config)) {
             const resp = await httpCall("POST", `/users/${fp}/profile-text`, {
@@ -1049,7 +937,7 @@ async function main() {
           deleteConfig("user_profile");
           deleteConfig("user_profile_tags");
           deleteConfig("user_profile_set_at");
-          // Clearing the profile also clears first_run_complete so the next init re-triggers the first-run diagnostic card.
+          // Clearing also resets first-run flag so init re-triggers the card.
           deleteConfig("first_run_complete");
           deleteConfig("first_run_at");
           result = { intent: "profile:clear", cleared: true };
@@ -1064,7 +952,6 @@ async function main() {
       break;
     }
 
-    // Mark the first-run diagnostic flow as done (one-shot flag so we don't re-run the card on every startup).
     case "first-run-done":
       writeConfig("first_run_complete", "true");
       writeConfig("first_run_at", isoNow());
@@ -1078,42 +965,20 @@ async function main() {
     case "help":
     case "--help":
     case "-h":
-      console.error(`Mapick - Node.js version
+      console.error(`Mapick — node shell.js <command> [args...]
 
-Usage: node shell.js <command> [args...]
-
-Commands:
-  init / status           Skill status overview
-  scan                    Force re-scan
-  recommend [limit]       Personalized recommendations (cached 24h)
-  recommend:track <recId> <skillId> <action>  Track feedback
-  search <query> [limit]  Search skills
-  clean                   Zombie skill list
-  clean:track <skillId>   Record zombie cleanup
-  uninstall <skillId> [--confirm]  Uninstall skill (backup to trash)
-  workflow                Workflow analysis
-  daily                   Daily digest
-  weekly                  Weekly report
-  bundle                  List bundles
-  bundle <id>             Bundle details
-  bundle:install <id>     Fetch install commands
-  bundle:track-installed <id>  Record bundle install
-  report                  Persona report
-  share <reportId> <html> [locale]  Upload share page
-  security <skillId>      Security score
-  privacy status          Show consent + trusted skills
-  privacy trust <skillId>      Trust a skill
-  privacy untrust <skillId>    Revoke trust
-  privacy delete-all --confirm  GDPR erasure
-  privacy consent-agree [version]  Record consent
-  privacy consent-decline      Decline consent (local-only mode)
-  event:track <userId> <action> [skillId]  Record event
-  summary                 First-run diagnostic (local + optional backend)
-  profile set "<text>"    Save user workflow self-description
-  profile get             Read cached workflow profile
-  profile clear           Reset profile + retrigger first-run summary
-  first-run-done          Mark one-time first-run flag complete
-  id                      Debug identifier (debug)`);
+Local:    init | status | scan | summary | id | first-run-done
+Skills:   recommend [limit] | recommend:track <recId> <skillId> <action>
+          search <query> [limit] | clean | clean:track <skillId>
+          uninstall <skillId> [--confirm]
+Reports:  workflow | daily | weekly | report | share <reportId> <html> [locale]
+Bundles:  bundle [id] | bundle install <id> | bundle track-installed <id>
+Security: security <skillId> | security:report <skillId> <reason> <evidence>
+Privacy:  privacy {status|trust <id>|untrust <id>|delete-all --confirm
+                 |consent-agree [ver]|consent-decline
+                 |disable-redact|enable-redact}
+Events:   event:track <userId> <action> [skillId]
+Profile:  profile {set "<text>"|get|clear}`);
       result = { error: "usage" };
       break;
 
@@ -1125,7 +990,7 @@ Commands:
       };
   }
 
-  console.log(JSON.stringify(result));
+  console.log(JSON.stringify(clampOutput(result)));
 }
 
 main().catch((e) => console.log(JSON.stringify({ error: e.message })));
