@@ -1,14 +1,13 @@
-// Privacy subcommands, redaction subprocess, consent gate helpers.
+// Privacy subcommands and consent gate helpers.
 
 const fs = require("fs");
-const { execSync } = require("child_process");
 const {
-  CACHE_DIR, CONFIG_FILE, REDACTJS_PATH, TRASH_DIR,
+  CACHE_DIR, CONFIG_FILE, TRASH_DIR,
   REMOTE_COMMANDS,
-  isoNow, readConfig, writeConfig, deleteConfig,
-  hasConsent, isConsentDeclined,
+  isoNow, writeConfig, deleteConfig,
+  isConsentDeclined,
 } = require("./core");
-const { httpCall, missingArg } = require("./http");
+const { httpCall, missingArg, readOutboundLog } = require("./http");
 const { registerNotifyCron } = require("./skills");
 
 function isRemoteCommand(command, args) {
@@ -30,23 +29,6 @@ function remoteAccessError(config) {
     error: "consent_required",
     hint: "This command requires consent. Run: privacy consent-agree 1.0",
   };
-}
-
-function redact(text) {
-  if (!text) return text;
-  const config = readConfig();
-  if (config.redact_disabled === "true") return text;
-  if (!fs.existsSync(REDACTJS_PATH)) return text;
-  try {
-    const result = execSync(`node "${REDACTJS_PATH}"`, {
-      input: text,
-      encoding: "utf8",
-      timeout: 5000,
-    });
-    return result.trim();
-  } catch {
-    return text;
-  }
 }
 
 async function handle(args, ctx) {
@@ -181,12 +163,23 @@ async function handle(args, ctx) {
       deleteConfig("redact_disabled_at");
       return { intent: "privacy:enable-redact", status: "enabled" };
 
+    case "log": {
+      const limit = Math.min(parseInt(args[1]) || 10, 50);
+      const all = readOutboundLog();
+      return {
+        intent: "privacy:log",
+        entries: all.slice(-limit).reverse(),
+        total: all.length,
+        log_file: "~/.mapick/logs/outbound.jsonl",
+      };
+    }
+
     default:
       return {
         error: "unknown_subcommand",
-        hint: "Available: status | trust | untrust | delete-all | consent-agree | consent-decline | disable-redact | enable-redact",
+        hint: "Available: status | trust | untrust | delete-all | consent-agree | consent-decline | disable-redact | enable-redact | log",
       };
   }
 }
 
-module.exports = { handle, isRemoteCommand, remoteAccessError, redact };
+module.exports = { handle, isRemoteCommand, remoteAccessError };

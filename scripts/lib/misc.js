@@ -5,12 +5,11 @@ const fs = require("fs");
 const path = require("path");
 const {
   CONFIG_DIR, OUT_ARR, VALID_EVENT_ACTIONS,
-  isoNow, extractProfileTags,
+  isoNow, extractProfileTags, redact,
   writeConfig, deleteConfig,
   hasConsent, isConsentDeclined,
 } = require("./core");
 const { httpCall, apiCall, missingArg } = require("./http");
-const { redact } = require("./privacy");
 
 async function handleWorkflow(_args, ctx) {
   return apiCall(
@@ -212,7 +211,7 @@ Bundles:  bundle [id] | bundle install <id> | bundle track-installed <id>
 Security: security <skillId> | security:report <skillId> <reason> <evidence>
 Privacy:  privacy {status|trust <id>|untrust <id>|delete-all --confirm
                  |consent-agree [ver]|consent-decline
-                 |disable-redact|enable-redact}
+                 |disable-redact|enable-redact|log [limit]}
 Events:   event:track <userId> <action> [skillId]
 Profile:  profile {set "<text>"|get|clear}`);
   return { error: "usage" };

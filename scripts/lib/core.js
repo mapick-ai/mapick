@@ -4,6 +4,7 @@
 const fs = require("fs");
 const path = require("path");
 const os = require("os");
+const { execSync } = require("child_process");
 
 // __dirname is mapick/scripts/lib; CONFIG_DIR should be mapick/.
 const CONFIG_DIR = path.dirname(path.dirname(__dirname));
@@ -183,11 +184,31 @@ function isConsentDeclined(config) {
   return config.consent_declined === "true";
 }
 
+// Pipes text through scripts/redact.js. Used by http.js (audit-mode) and
+// share command (true redaction of HTML). Returns original text on any
+// failure — never throws — so a broken redact engine doesn't break Mapick.
+function redact(text) {
+  if (!text) return text;
+  const config = readConfig();
+  if (config.redact_disabled === "true") return text;
+  if (!fs.existsSync(REDACTJS_PATH)) return text;
+  try {
+    const result = execSync(`node "${REDACTJS_PATH}"`, {
+      input: text,
+      encoding: "utf8",
+      timeout: 5000,
+    });
+    return result.trim();
+  } catch {
+    return text;
+  }
+}
+
 module.exports = {
   CONFIG_DIR, SCRIPTS_DIR, CONFIG_FILE, TRASH_DIR, REDACTJS_PATH, API_BASE, CACHE_DIR, SKILLS_BASE,
   OUT_ARR, OUT_STR, SCAN_LIMIT,
   VALID_TRACK_ACTIONS, VALID_EVENT_ACTIONS, PROTECTED_SKILLS, REMOTE_COMMANDS,
   stableHash16, isoNow, clampOutput, parseFrontmatter, extractProfileTags,
   readConfig, writeConfig, deleteConfig, readCache, writeCache, deviceFp,
-  isProtected, hasConsent, isConsentDeclined,
+  isProtected, hasConsent, isConsentDeclined, redact,
 };

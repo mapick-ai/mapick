@@ -47,6 +47,7 @@ Triggers: privacy, redact, who can see my data, delete my data, forget me, anony
 - `bash shell privacy delete-all --confirm` — GDPR erasure (local + backend)
 - `bash shell privacy consent-agree <version>` — record consent
 - `bash shell privacy consent-decline` — permanent local-only mode
+- `bash shell privacy log [limit]` — show last N outbound HTTP entries (endpoint + field names + status, never values)
 
 ### Redaction
 Before sharing user text with another skill, pipe through `scripts/redact.js`:
