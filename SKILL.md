@@ -70,10 +70,34 @@ Otherwise render like `recommend` (same score filter, same badges, 3-5 items max
 ### User picks an item ("install it" / "yes" / "1")
 
 1. Identify the target item from the last rendered list (number, name, or natural-language reference).
-2. From `installCommands[]`, pick `platform: "openclaw"` and run that `command` in the user's shell.
-3. On success: `node scripts/shell.js recommend:track <recId> <skillId> installed`.
-4. On failure: report error (translated), suggest retry or skip.
-5. Confirm: "✅ {skillName} installed. Want to see more?"
+2. **Resolve the canonical skill slug** (see `Install command rule (STRICT)` below). NEVER pass through a raw backend `installCommands[].command` — those have shipped malformed in production (e.g. `clawhub install skillssh:soultrace-ai/soultrace-skill/soultrace`).
+3. Run `openclaw skills install <slug>` in the user's shell.
+4. On success: `node scripts/shell.js recommend:track <recId> <skillId> installed`.
+5. On failure: report error (translated), suggest retry or skip.
+6. Confirm: "✅ {skillName} installed. Want to see more?"
+
+### Install command rule (STRICT)
+
+When the user selects a recommended skill to install, ALWAYS use:
+
+```
+openclaw skills install <slug>
+```
+
+Where `<slug>` is the canonical short skill name. Resolution order:
+
+1. If the item has a `slug` or canonical `skillId` short form (e.g. `code-review`), use that.
+2. If the only identifier is `skillssh:org/repo/skill`-style, extract the **last segment** as a temporary fallback. Example: `skillssh:soultrace-ai/soultrace-skill/soultrace` → `soultrace`.
+3. If neither produces a usable short name, refuse to install and surface the raw identifier so the user can decide.
+
+**NEVER** show or execute:
+- raw `installCommands[].command` strings from the backend without normalization,
+- `skillssh:` prefixes,
+- full repo paths like `org/repo/skill`,
+- `npx @mapick/install`,
+- `clawhub install skillssh:...`.
+
+This rule applies to **both** the recommendation install path AND the bundle install path. The backend may eventually return canonical slugs in a dedicated field; until then the skill layer is responsible for normalizing.
 
 ### Caching
 Last `recommend` response cached 24h. Force refresh by passing an explicit limit (e.g. `recommend 10`).
@@ -283,7 +307,7 @@ Triggers: bundle, workflow pack, skill pack.
     { "skillId": "docker-compose", "command": "clawhub install docker-compose" }
   ], "installed": false }
 ```
-**Step 2**: Execute each `installCommands[i].command`, track per-command result, then call `bundle:track-installed <bundleId>`.
+**Step 2**: For each entry in `installCommands[]`, **resolve the canonical slug** per the `Install command rule (STRICT)` above (prefer `installCommands[i].skillId` short form; fall back to last segment of `skillssh:org/repo/skill`; refuse if neither produces a clean short name). Then run `openclaw skills install <slug>` for each — **NEVER** execute the raw `installCommands[i].command` string verbatim, since the same malformed-payload class that breaks the recommend install path (e.g. `clawhub install skillssh:soultrace-ai/soultrace-skill/soultrace`) can leak through here too. Track per-skill result, then call `bundle:track-installed <bundleId>`.
 **Step 3**: Report "Installed N of M skills from bundle <name>."
 
 ### Failure playbook
