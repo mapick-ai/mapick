@@ -2,6 +2,12 @@
 
 All notable changes to Mapick will be documented in this file.
 
+## v0.0.6 - 2026-04-28
+
+### Changed
+
+- normal update
+
 ## v0.0.5 - 2026-04-28
 
 ### Reverted
