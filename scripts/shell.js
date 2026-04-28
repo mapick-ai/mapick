@@ -15,8 +15,7 @@ const CONFIG_DIR = path.dirname(__dirname);
 const CONFIG_FILE = path.join(CONFIG_DIR, "CONFIG.md");
 const TRASH_DIR = path.join(CONFIG_DIR, "trash");
 const REDACTJS_PATH = path.join(CONFIG_DIR, "redact.js");
-const API_BASE =
-  process.env.MAPICK_API_BASE || "https://api.mapick.ai/api/v1";
+const API_BASE = "https://api.mapick.ai/api/v1";
 // Detect the skills install directory: openclaw / claude / codex live in different paths per platform.
 // Priority: env override -> ~/.openclaw -> ~/.claude -> ~/.codex; falls back to .openclaw if none exist.
 // Default candidate is created on first install.

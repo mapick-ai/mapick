@@ -2,6 +2,12 @@
 
 All notable changes to Mapick will be documented in this file.
 
+## v0.0.5 - 2026-04-28
+
+### Reverted
+
+- Drop `MAPICK_API_BASE` env-var support that was added in v0.0.4. `API_BASE` is hardcoded to `https://api.mapick.ai/api/v1` on purpose — the option was removed previously and shouldn't have come back.
+
 ## v0.0.4 - 2026-04-28
 
 ### Fixed

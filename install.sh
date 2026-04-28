@@ -3,11 +3,11 @@
 #
 # Install or update Mapick Skill with a single command:
 #
-#   curl -fsSL https://raw.githubusercontent.com/mapick-ai/mapick/v0.0.4/install.sh | bash
-#   wget -qO- https://raw.githubusercontent.com/mapick-ai/mapick/v0.0.4/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/mapick-ai/mapick/v0.0.5/install.sh | bash
+#   wget -qO- https://raw.githubusercontent.com/mapick-ai/mapick/v0.0.5/install.sh | bash
 #
 # Options (via environment variables):
-#   MAPICK_VERSION=v0.0.4  bash -c "$(curl -fsSL ...)"   # Install specific version
+#   MAPICK_VERSION=v0.0.5  bash -c "$(curl -fsSL ...)"   # Install specific version
 #   MAPICK_REPO=owner/repo bash -c "$(curl -fsSL ...)"   # Override source repo
 
 set -e
