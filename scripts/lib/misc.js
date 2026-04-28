@@ -121,18 +121,24 @@ async function handleShare(args) {
   );
 }
 
-async function handleEvent(args) {
-  if (args.length < 2) {
-    return missingArg("Usage: event:track <userId> <action> [skillId]");
+async function handleEvent(args, ctx) {
+  // Always use the local fp; never accept userId from CLI args. Sibling
+  // track commands (recommend:track / clean:track / profile-text) all
+  // work this way. Letting userId flow in from ARGS was a misleading API
+  // surface — the help text actively asked the AI to supply a userId —
+  // and a future-footgun if the backend ever stops cross-checking the
+  // x-device-fp header against body.userId.
+  if (args.length < 1) {
+    return missingArg("Usage: event:track <action> [skillId]");
   }
-  const [userId, actionType, metaSkillId] = args;
+  const [actionType, metaSkillId] = args;
   if (!VALID_EVENT_ACTIONS.includes(actionType)) {
     return { error: "invalid_action", valid: VALID_EVENT_ACTIONS };
   }
   return apiCall(
     "POST",
     "/events/track",
-    { userId, action: actionType, skillId: metaSkillId || null },
+    { userId: ctx.fp, action: actionType, skillId: metaSkillId || null },
     "event:track",
   );
 }
@@ -212,7 +218,7 @@ Security: security <skillId> | security:report <skillId> <reason> <evidence>
 Privacy:  privacy {status|trust <id>|untrust <id>|delete-all --confirm
                  |consent-agree [ver]|consent-decline
                  |disable-redact|enable-redact|log [limit]}
-Events:   event:track <userId> <action> [skillId]
+Events:   event:track <action> [skillId]   (always uses local device fp)
 Profile:  profile {set "<text>"|get|clear}`);
   return { error: "usage" };
 }
