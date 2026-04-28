@@ -620,13 +620,23 @@ async function main() {
       }
       break;
 
-    case "clean":
+    case "clean": {
       const cleanResp = await httpCall("GET", `/users/${fp}/zombies`);
-      result = {
-        intent: "clean",
-        zombies: cleanResp.zombies || cleanResp || [],
-      };
+      // The previous shape `cleanResp.zombies || cleanResp || []` let backend
+      // error objects ({error,statusCode}) leak through as the `zombies` array
+      // because `error` is truthy. Pass errors through explicitly; otherwise
+      // accept either a top-level array or `{zombies: [...]}` shape (the
+      // endpoint has shipped both at different points — see mapickii history).
+      if (cleanResp && cleanResp.error) {
+        result = cleanResp;
+      } else {
+        result = {
+          intent: "clean",
+          zombies: Array.isArray(cleanResp) ? cleanResp : (cleanResp?.zombies || []),
+        };
+      }
       break;
+    }
 
     // PR-26 → PR-27 simplified: single GET /notify/daily-check call. Backend
     // handles version comparison (cached GitHub fetch), zombies fetch, and
