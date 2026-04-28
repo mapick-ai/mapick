@@ -181,10 +181,6 @@ function isProtected(skillId) {
   return PROTECTED_SKILLS.includes(skillId.toLowerCase());
 }
 
-function hasConsent(config) {
-  return Boolean(config.consent_version);
-}
-
 function isConsentDeclined(config) {
   return config.consent_declined === "true";
 }
@@ -215,5 +211,5 @@ module.exports = {
   VALID_TRACK_ACTIONS, VALID_EVENT_ACTIONS, PROTECTED_SKILLS, REMOTE_COMMANDS,
   stableHash16, isoNow, clampOutput, parseFrontmatter, extractProfileTags,
   readConfig, writeConfig, deleteConfig, readCache, writeCache, deviceFp,
-  isProtected, hasConsent, isConsentDeclined, redact,
+  isProtected, isConsentDeclined, redact,
 };

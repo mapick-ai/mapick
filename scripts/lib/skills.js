@@ -7,7 +7,7 @@ const {
   CONFIG_DIR, REDACTJS_PATH, SCRIPTS_DIR, SKILLS_BASE,
   isoNow, parseFrontmatter,
   readConfig, writeConfig,
-  hasConsent, isConsentDeclined,
+  isConsentDeclined,
 } = require("./core");
 const { httpCall } = require("./http");
 
@@ -103,8 +103,8 @@ async function aggregateSummary(skills, config) {
     has_backend: false,
   };
 
-  // Backend enrichment skipped without consent.
-  if (!hasConsent(config) || isConsentDeclined(config)) return summary;
+  // Backend enrichment skipped only when the user explicitly declined.
+  if (isConsentDeclined(config)) return summary;
 
   try {
     const status = await httpCall(
@@ -155,8 +155,9 @@ async function handleInit(_args, ctx) {
   ).length;
 
   // Safety-net re-register: recovers from manual cron deletion / prior
-  // install racing openclaw. registerNotifyCron is idempotent.
-  if (hasConsent(ctx.config)) registerNotifyCron();
+  // install racing openclaw. registerNotifyCron is idempotent. Skipped
+  // only for users who explicitly declined data sharing.
+  if (!isConsentDeclined(ctx.config)) registerNotifyCron();
 
   return {
     intent: "status",

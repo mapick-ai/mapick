@@ -49,13 +49,17 @@ Rendering: `reference/rendering.md#recommend` and `#search`.
 ### Intent: privacy
 Triggers: privacy, redact, who can see my data, delete my data, forget me, anonymous mode.
 
+### Privacy model: opt-out
+
+Mapick defaults to data-sharing **on** (anonymous device fp + Skill IDs + timestamps; no chat content, no API tokens). Users opt out at any time. There is no "first-install agreement gate" — `recommend`, `search`, `bundle`, `security` all work immediately.
+
 ### Subcommands
-- `node scripts/shell.js privacy status` — consent + trusted skills list
+- `node scripts/shell.js privacy status` — current mode (default vs declined) + trusted skills list
 - `node scripts/shell.js privacy trust <skillId>` — allow unredacted access
 - `node scripts/shell.js privacy untrust <skillId>` — revoke
 - `node scripts/shell.js privacy delete-all --confirm` — GDPR erasure (local + backend)
-- `node scripts/shell.js privacy consent-agree <version>` — record consent
-- `node scripts/shell.js privacy consent-decline` — permanent local-only mode
+- `node scripts/shell.js privacy consent-decline` — opt out: refuse remote commands client-side
+- `node scripts/shell.js privacy consent-agree` — undo a previous decline (only needed if you ran `consent-decline`)
 - `node scripts/shell.js privacy log [limit]` — show last N outbound HTTP entries (endpoint + field names + status, never values)
 
 ### Redaction
@@ -65,7 +69,7 @@ echo "$USER_TEXT" | node ~/.openclaw/skills/mapick/scripts/redact.js
 ```
 Removes provider access strings, certificates, DB URIs, contact info, identity numbers, query params, config values. Local regex only, ~1ms. Skills in `trustedSkills` are exempt.
 
-Consent flow + local-only mode: `reference/lifecycle.md`.
+Decline + re-enable flow: `reference/lifecycle.md`.
 Status + delete-all rendering: `reference/rendering.md#privacy:status`, `#privacy:delete-all`.
 
 ---

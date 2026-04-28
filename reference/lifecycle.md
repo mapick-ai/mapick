@@ -15,24 +15,21 @@ Install → First use → Active → Declining → Zombie → Uninstall
 
 Activation rate = `active_skills / total_installed` (report as %)
 
-## First-install consent flow
+## Privacy model: opt-out
 
-When shell returns `status: "consent_required"`:
+Mapick defaults to data-sharing **on** for new installs. There is no agreement gate. `recommend` / `search` / `bundle` / `security` all work the moment a user installs.
 
-1. Show `consentText` in the user's language (translate literally — substance: anonymous, no code, no conversations, deletable).
-2. Present two explicit options:
-   - **Agree** — Mapick uploads anonymous behavior data, returns recommendations.
-   - **Decline** — local-only mode (scan / clean / uninstall, no backend).
-3. Agree → `bash shell privacy consent-agree 1.0`.
-4. Decline → `bash shell privacy consent-decline`. Tell user what's still local; **do not re-prompt next session**.
-5. Undecided this session → state stays undecided; next `init` will prompt. **Do not nag in one session.**
+The first-install summary card includes a one-line disclosure with the actual outbound contract + how to opt out (`/mapick privacy log` to audit, `/mapick privacy consent-decline` to opt out).
 
-## Local-only mode
+## Decline / re-enable flow
 
-If `init` returns `status: "local_only"` (or any command returns `error: "disabled_in_local_mode"`):
-- Confirm local-only state **once** per session.
-- Backend-needing commands (`recommend` / `search` / `bundle install` / `recommend:track` / `privacy trust`): refuse with "this requires consent; run `/mapick privacy consent-agree 1.0`".
-- Local-only commands (`status` / `scan` / `clean` / `uninstall` / `privacy status` / `privacy delete-all`): proceed normally.
+If the user runs `/mapick privacy consent-decline`:
+- CONFIG.md gets `consent_declined: true`.
+- All remote commands (`recommend` / `search` / `bundle install` / `recommend:track` / `privacy trust` / `report` / `share` / `security` / `clean` / `clean:track` / `notify`) are refused **client-side** with `error: "disabled_in_local_mode"`.
+- Local commands (`status` / `scan` / `clean` reading local mtime only / `uninstall` / `privacy status` / `privacy delete-all` / `privacy log`) keep working.
+- `notify` cron is not re-registered on subsequent inits.
+
+To resume data sharing, run `/mapick privacy consent-agree`. Clears the declined flag, re-registers the notify cron, and remote commands work again.
 
 ## Auto-trigger on new conversation
 

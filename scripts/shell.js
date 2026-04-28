@@ -77,10 +77,10 @@ async function main() {
     fp: core.deviceFp(),
   };
 
-  if (
-    privacy.isRemoteCommand(command, args) &&
-    (!core.hasConsent(ctx.config) || core.isConsentDeclined(ctx.config))
-  ) {
+  // Opt-out model: data flows by default. Only block remote commands when
+  // the user has explicitly run `privacy consent-decline`. New installs
+  // skip the consent gate entirely.
+  if (privacy.isRemoteCommand(command, args) && core.isConsentDeclined(ctx.config)) {
     console.log(JSON.stringify(privacy.remoteAccessError(ctx.config)));
     return;
   }

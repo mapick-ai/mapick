@@ -7,7 +7,7 @@ const {
   CONFIG_DIR, OUT_ARR, VALID_EVENT_ACTIONS,
   isoNow, extractProfileTags, redact,
   writeConfig, deleteConfig,
-  hasConsent, isConsentDeclined,
+  isConsentDeclined,
 } = require("./core");
 const { httpCall, apiCall, missingArg } = require("./http");
 
@@ -156,7 +156,7 @@ async function handleProfile(args, ctx) {
       // POST /users/:userId/profile-text — userId in path. Local writes
       // never block on upload failure.
       let uploaded = false;
-      if (hasConsent(ctx.config) && !isConsentDeclined(ctx.config)) {
+      if (!isConsentDeclined(ctx.config)) {
         const resp = await httpCall(
           "POST",
           `/users/${ctx.fp}/profile-text`,

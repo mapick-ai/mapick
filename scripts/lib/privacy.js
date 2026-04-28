@@ -17,17 +17,13 @@ function isRemoteCommand(command, args) {
   return false;
 }
 
-function remoteAccessError(config) {
-  if (isConsentDeclined(config)) {
-    return {
-      error: "disabled_in_local_mode",
-      mode: "local_only",
-      hint: "This command requires consent. Run: privacy consent-agree 1.0",
-    };
-  }
+function remoteAccessError(_config) {
+  // Only reached when isConsentDeclined === true; the new-install consent
+  // gate is gone (opt-out model).
   return {
-    error: "consent_required",
-    hint: "This command requires consent. Run: privacy consent-agree 1.0",
+    error: "disabled_in_local_mode",
+    mode: "local_only",
+    hint: "You opted out earlier. Run `node scripts/shell.js privacy consent-agree` to resume — same anonymous flow new installs are on.",
   };
 }
 
