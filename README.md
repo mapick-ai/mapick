@@ -117,7 +117,7 @@ Then just talk to your agent in any language:
 "Is my data safe?"  "推荐几个"  "Clean up"  "Is X safe?"  "Analyze me"  "Bundles"
 ```
 
-**Requirements:** OpenClaw (any version), Node.js (>=18), jq, curl.
+**Requirements:** OpenClaw, Node.js (>=22.14, OpenClaw recommends 24), curl.
 
 ---
 
