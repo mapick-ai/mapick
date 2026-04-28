@@ -1,14 +1,17 @@
 #!/usr/bin/env bash
 # Mapick Skill — Install Script (V1: OpenClaw only)
 #
-# Install or update Mapick Skill with a single command:
+# Recommended install path is `clawhub install mapick`. This script is for
+# recovery, CI, pinned versions, or environments without ClawHub access.
+# Always review the script before running it:
 #
-#   curl -fsSL https://raw.githubusercontent.com/mapick-ai/mapick/v0.0.6/install.sh | bash
-#   wget -qO- https://raw.githubusercontent.com/mapick-ai/mapick/v0.0.6/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/mapick-ai/mapick/v0.0.9/install.sh -o install.sh
+#   less install.sh
+#   bash install.sh
 #
 # Options (via environment variables):
-#   MAPICK_VERSION=v0.0.6  bash -c "$(curl -fsSL ...)"   # Install specific version
-#   MAPICK_REPO=owner/repo bash -c "$(curl -fsSL ...)"   # Override source repo
+#   MAPICK_VERSION=v0.0.9  ./install.sh   # Install specific version
+#   MAPICK_REPO=owner/repo ./install.sh   # Override source repo
 
 set -e
 
@@ -78,7 +81,7 @@ fi
 
 ok "OpenClaw detected: ${OPENCLAW_PATH}"
 
-# -- Detect runtime (Node.js required, >=18) -----------------------------------
+# -- Detect runtime (Node.js >=22.14 required) ---------------------------------
 
 if ! command -v node &>/dev/null; then
   error "Node.js not detected. Mapick requires Node.js 22.14 or later
@@ -89,7 +92,6 @@ if ! command -v node &>/dev/null; then
 fi
 
 NODE_VER="$(node --version)"
-# Strip leading v and parse major.minor; 22.14 is the OpenClaw runtime floor.
 NODE_MAJOR="$(echo "${NODE_VER}" | sed 's/^v\([0-9]*\).*/\1/')"
 NODE_MINOR="$(echo "${NODE_VER}" | sed 's/^v[0-9]*\.\([0-9]*\).*/\1/')"
 if ! [[ "${NODE_MAJOR}" =~ ^[0-9]+$ ]] \
