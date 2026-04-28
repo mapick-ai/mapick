@@ -2,6 +2,12 @@
 
 All notable changes to Mapick will be documented in this file.
 
+## v0.0.3 - 2026-04-28
+
+### Fixed
+
+- `httpCall()` switched from Node `https.request` to `curl` subprocess. Node 24 + macOS `https` throws `UNABLE_TO_VERIFY_LEAF_SIGNATURE` against valid TLS endpoints because Node's bundled CA store doesn't include the intermediate certs the system keychain trusts; `--use-system-ca` doesn't reliably bridge it on 24.x. curl uses the OS trust store directly. Symptom this fixes: every `mapick` backend call (notify, recommend, consent-agree, etc.) was silently failing the SSL handshake → notify always returned empty alerts, consent-agree never persisted server-side. `curl` is already declared in SKILL.md `requires.bins`, so no new dependency.
+
 ## v0.0.2 - 2026-04-28
 
 ### Fixed

@@ -137,53 +137,82 @@ function writeCache(key, data, ttlHours = 24) {
   fs.writeFileSync(path.join(CACHE_DIR, `${key}.json`), JSON.stringify(data));
 }
 
+// Backend HTTP client. Uses `curl` (system binary, already required in SKILL.md
+// frontmatter) instead of Node's `https.request`.
+//
+// Why curl: Node 24 + macOS keychain interaction is flaky — `https.request`
+// throws UNABLE_TO_VERIFY_LEAF_SIGNATURE for valid TLS endpoints because Node's
+// bundled CA store doesn't include intermediate certs that the system keychain
+// trusts. `--use-system-ca` is supposed to bridge this but doesn't reliably work
+// on macOS in 24.x. curl uses the OS trust store directly and "just works",
+// keeping mapick installs functional regardless of the user's Node version.
 async function httpCall(method, endpoint, body = null) {
   const base = API_BASE.replace(/\/$/, "") + "/";
   const url = new URL(endpoint.replace(/^\//, ""), base);
-  const isHttps = url.protocol === "https:";
-  const httpModule = isHttps ? https : require("http");
-  const options = {
-    hostname: url.hostname,
-    port: url.port || (isHttps ? 443 : 80),
-    path: url.pathname + url.search,
-    method,
-    headers: {
-      "Content-Type": "application/json",
-      "x-device-fp": deviceFp(),
-    },
-  };
+  const STATUS_DELIM = "___MAPICK_HTTP_STATUS___";
 
-  return new Promise((resolve, reject) => {
-    const req = httpModule.request(options, (res) => {
-      let data = "";
-      res.on("data", (chunk) => (data += chunk));
-      res.on("end", () => {
-        if (res.statusCode === 401)
-          resolve({ error: "unauthorized", statusCode: 401 });
-        else if (res.statusCode === 404)
-          resolve({ error: "not_found", statusCode: 404 });
-        else if (res.statusCode === 429)
-          resolve({ error: "rate_limit", statusCode: 429 });
-        else if (res.statusCode >= 400)
+  // -s silent, -S still show errors, -L follow redirects, -m timeout.
+  // Append %{http_code} after a unique delimiter so we can split the body
+  // from the status code without worrying about embedded newlines in JSON.
+  const args = [
+    "-sSL",
+    "-X", method,
+    "-m", "15",
+    "-H", "Content-Type: application/json",
+    "-H", `x-device-fp: ${deviceFp()}`,
+    "-w", `\n${STATUS_DELIM}%{http_code}`,
+    url.toString(),
+  ];
+  if (body) {
+    args.push("-d", JSON.stringify(body));
+  }
+
+  return new Promise((resolve) => {
+    const cp = require("child_process").execFile(
+      "curl",
+      args,
+      { maxBuffer: 8 * 1024 * 1024 },
+      (err, stdout) => {
+        if (err && !stdout) {
+          resolve({ error: "network_error", message: err.message });
+          return;
+        }
+        const idx = stdout.lastIndexOf(STATUS_DELIM);
+        const data = idx >= 0 ? stdout.slice(0, idx).replace(/\n$/, "") : stdout;
+        const code = idx >= 0 ? parseInt(stdout.slice(idx + STATUS_DELIM.length).trim(), 10) : 0;
+
+        if (!code || Number.isNaN(code)) {
           resolve({
-            error: "http_error",
-            statusCode: res.statusCode,
-            body: data,
+            error: "network_error",
+            message: err ? err.message : "no_status_code",
           });
-        else {
+        } else if (code === 401) {
+          resolve({ error: "unauthorized", statusCode: 401 });
+        } else if (code === 404) {
+          resolve({ error: "not_found", statusCode: 404 });
+        } else if (code === 429) {
+          resolve({ error: "rate_limit", statusCode: 429 });
+        } else if (code >= 400) {
+          // Try to surface backend-shaped error JSON; fall back to raw body.
+          try {
+            const parsed = JSON.parse(data);
+            resolve({ error: "http_error", statusCode: code, ...parsed });
+          } catch {
+            resolve({ error: "http_error", statusCode: code, body: data });
+          }
+        } else {
           try {
             resolve(JSON.parse(data));
           } catch {
             resolve({ error: "parse_error", raw: data });
           }
         }
-      });
-    });
-    req.on("error", (e) =>
+      },
+    );
+    // execFile doesn't pipe stdin by default; we passed body via -d already.
+    cp.on("error", (e) =>
       resolve({ error: "network_error", message: e.message }),
     );
-    if (body) req.write(JSON.stringify(body));
-    req.end();
   });
 }
 
