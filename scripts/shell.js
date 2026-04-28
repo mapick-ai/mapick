@@ -4,6 +4,25 @@
  * Usage: node shell.js <command> [args...]
  */
 
+// Runtime preflight: bail with a structured error on Node < 22.14 (the
+// OpenClaw runtime baseline; OpenClaw recommends 24) instead of letting V8
+// emit an opaque SyntaxError when newer JS features are parsed.
+// Exit 0 matches the rest of this file's contract (errors are JSON-on-stdout).
+const [_NODE_MAJOR, _NODE_MINOR] = process.versions.node.split(".").map((n) => parseInt(n, 10));
+if (
+  !Number.isFinite(_NODE_MAJOR) ||
+  _NODE_MAJOR < 22 ||
+  (_NODE_MAJOR === 22 && _NODE_MINOR < 14)
+) {
+  console.log(JSON.stringify({
+    error: "node_too_old",
+    required: ">=22.14",
+    got: process.version,
+    hint: "Install Node.js 22.14 or later (OpenClaw runtime baseline) from https://nodejs.org",
+  }));
+  process.exit(0);
+}
+
 const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
@@ -14,7 +33,12 @@ const { execSync } = require("child_process");
 const CONFIG_DIR = path.dirname(__dirname);
 const CONFIG_FILE = path.join(CONFIG_DIR, "CONFIG.md");
 const TRASH_DIR = path.join(CONFIG_DIR, "trash");
-const REDACTJS_PATH = path.join(CONFIG_DIR, "redact.js");
+// redact.js lives next to this file (scripts/), NOT at CONFIG_DIR root.
+// The previous CONFIG_DIR-based path silently no-op'd redact() on every call
+// (existsSync returned false → early return), so `share` was uploading raw
+// HTML with zero redaction applied. countRedactRules() already used a
+// 2-candidate fallback that included this path; redact() never did.
+const REDACTJS_PATH = path.join(__dirname, "redact.js");
 const API_BASE = "https://api.mapick.ai/api/v1";
 // Detect the skills install directory: openclaw / claude / codex live in different paths per platform.
 // Priority: env override -> ~/.openclaw -> ~/.claude -> ~/.codex; falls back to .openclaw if none exist.
@@ -186,19 +210,24 @@ async function httpCall(method, endpoint, body = null) {
             error: "network_error",
             message: err ? err.message : "no_status_code",
           });
-        } else if (code === 401) {
-          resolve({ error: "unauthorized", statusCode: 401 });
-        } else if (code === 404) {
-          resolve({ error: "not_found", statusCode: 404 });
-        } else if (code === 429) {
-          resolve({ error: "rate_limit", statusCode: 429 });
         } else if (code >= 400) {
-          // Try to surface backend-shaped error JSON; fall back to raw body.
+          // Pass through backend body for ALL 4xx/5xx, including 401/404/429.
+          // Previously these three had fixed shapes that dropped the backend's
+          // `message` / `hint` / `retryAfterSec` / etc. — so the AI saw a bare
+          // "unauthorized" with no way to tell the user to run consent-agree
+          // (regression of mapickii PR-21).
+          const stableErrors = {
+            401: "unauthorized",
+            404: "not_found",
+            429: "rate_limit",
+          };
+          const errCode = stableErrors[code] || "http_error";
           try {
             const parsed = JSON.parse(data);
-            resolve({ error: "http_error", statusCode: code, ...parsed });
+            // backend body merged into result; statusCode authoritative.
+            resolve({ error: errCode, statusCode: code, ...parsed });
           } catch {
-            resolve({ error: "http_error", statusCode: code, body: data });
+            resolve({ error: errCode, statusCode: code, body: data });
           }
         } else {
           try {
@@ -620,13 +649,23 @@ async function main() {
       }
       break;
 
-    case "clean":
+    case "clean": {
       const cleanResp = await httpCall("GET", `/users/${fp}/zombies`);
-      result = {
-        intent: "clean",
-        zombies: cleanResp.zombies || cleanResp || [],
-      };
+      // The previous shape `cleanResp.zombies || cleanResp || []` let backend
+      // error objects ({error,statusCode}) leak through as the `zombies` array
+      // because `error` is truthy. Pass errors through explicitly; otherwise
+      // accept either a top-level array or `{zombies: [...]}` shape (the
+      // endpoint has shipped both at different points — see mapickii history).
+      if (cleanResp && cleanResp.error) {
+        result = cleanResp;
+      } else {
+        result = {
+          intent: "clean",
+          zombies: Array.isArray(cleanResp) ? cleanResp : (cleanResp?.zombies || []),
+        };
+      }
       break;
+    }
 
     // PR-26 → PR-27 simplified: single GET /notify/daily-check call. Backend
     // handles version comparison (cached GitHub fetch), zombies fetch, and

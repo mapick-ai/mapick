@@ -78,14 +78,31 @@ fi
 
 ok "OpenClaw detected: ${OPENCLAW_PATH}"
 
-# -- Detect runtime (Node.js required) -----------------------------------------
+# -- Detect runtime (Node.js required, >=18) -----------------------------------
 
-if command -v node &>/dev/null; then
-  ok "Node.js detected: $(node --version)"
-else
-  warn "Node.js not detected."
-  warn "Mapick commands will not run until you install Node.js (>=18)."
+if ! command -v node &>/dev/null; then
+  error "Node.js not detected. Mapick requires Node.js 22.14 or later
+  (the OpenClaw runtime baseline; OpenClaw recommends 24).
+
+  Install Node.js: https://nodejs.org
+  Then retry this script."
 fi
+
+NODE_VER="$(node --version)"
+# Strip leading v and parse major.minor; 22.14 is the OpenClaw runtime floor.
+NODE_MAJOR="$(echo "${NODE_VER}" | sed 's/^v\([0-9]*\).*/\1/')"
+NODE_MINOR="$(echo "${NODE_VER}" | sed 's/^v[0-9]*\.\([0-9]*\).*/\1/')"
+if ! [[ "${NODE_MAJOR}" =~ ^[0-9]+$ ]] \
+   || (( NODE_MAJOR < 22 )) \
+   || { (( NODE_MAJOR == 22 )) && (( NODE_MINOR < 14 )); }; then
+  error "Node.js ${NODE_VER} is too old. Mapick requires Node.js 22.14 or later
+  (the OpenClaw runtime baseline; OpenClaw recommends 24).
+
+  Upgrade Node.js: https://nodejs.org
+  Then retry this script."
+fi
+
+ok "Node.js detected: ${NODE_VER}"
 
 # -- Download tarball ----------------------------------------------------------
 
@@ -147,7 +164,7 @@ for item in "${INSTALL_ITEMS[@]}"; do
 done
 
 # Ensure entry scripts are executable
-for exe in scripts/shell scripts/shell.js scripts/redact.js; do
+for exe in scripts/shell.js scripts/redact.js; do
   [[ -f "${target_dir}/${exe}" ]] && chmod +x "${target_dir}/${exe}"
 done
 
@@ -162,7 +179,7 @@ fi
 # GitHub release at runtime. Plain text, single line.
 echo "${VERSION}" > "${target_dir}/.version"
 
-if [[ ! -f "${target_dir}/SKILL.md" ]] || [[ ! -f "${target_dir}/scripts/shell" ]]; then
+if [[ ! -f "${target_dir}/SKILL.md" ]] || [[ ! -f "${target_dir}/scripts/shell.js" ]]; then
   error "Installation failed (required files missing after copy)."
 fi
 
