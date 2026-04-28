@@ -2,6 +2,12 @@
 
 All notable changes to Mapick will be documented in this file.
 
+## v0.0.9 - 2026-04-29
+
+### Changed
+
+- Promote opt-out privacy + lib/ refactor + outbound audit + main fix port to install latest channel
+
 ## v0.0.7 - 2026-04-28
 
 ### Fixed
