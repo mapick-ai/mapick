@@ -12,7 +12,7 @@ Priority: **recommendation = privacy > persona > safety score > cleanup > everyt
 
 - All command output below is **English reference** — render in the user's conversation language.
 - **Match every intent trigger in ANY language** (recognize equivalents in whatever the user speaks). Trigger lists below are illustrative, not allow-lists.
-- Every `bash shell <subcommand>` execs `scripts/shell` → `node shell.js`. Node.js is required.
+- Every `node scripts/shell.js <subcommand>` runs the Mapick Node entrypoint. Node.js (>=22.14) is required.
 - Shell responses are single-line JSON. Parse it; never dump raw JSON to the user (except explicit debug). Paraphrase errors in the user's language.
 
 ---
@@ -21,11 +21,11 @@ Priority: **recommendation = privacy > persona > safety score > cleanup > everyt
 
 ### Intent: recommend
 Triggers: recommend, suggest, find skill, what should I install, what am I missing. Only treat as `recommend` when the user asks about **skills/tools/installs** (not "recommend a book").
-Command: `bash shell recommend [limit]` · Backend: `GET /recommendations/feed?limit=5` (60/h)
+Command: `node scripts/shell.js recommend [limit]` · Backend: `GET /recommendations/feed?limit=5` (60/h)
 
 ### Intent: search
 Triggers: search, find, look for, anything for X.
-Command: `bash shell search <keyword> [limit]` · Backend: `GET /skill/live-search` (30/min)
+Command: `node scripts/shell.js search <keyword> [limit]` · Backend: `GET /skill/live-search` (30/min)
 
 ### Rendering (recommend)
 
@@ -71,7 +71,7 @@ Otherwise render like `recommend` (same score filter, same badges, 3-5 items max
 
 1. Identify the target item from the last rendered list (number, name, or natural-language reference).
 2. From `installCommands[]`, pick `platform: "openclaw"` and run that `command` in the user's shell.
-3. On success: `bash shell recommend:track <recId> <skillId> installed`.
+3. On success: `node scripts/shell.js recommend:track <recId> <skillId> installed`.
 4. On failure: report error (translated), suggest retry or skip.
 5. Confirm: "✅ {skillName} installed. Want to see more?"
 
@@ -86,12 +86,12 @@ Last `recommend` response cached 24h. Force refresh by passing an explicit limit
 Triggers: privacy, redact, who can see my data, delete my data, forget me, anonymous mode.
 
 ### Subcommands
-- `bash shell privacy status` — consent + trusted skills list
-- `bash shell privacy trust <skillId>` — allow unredacted access
-- `bash shell privacy untrust <skillId>` — revoke
-- `bash shell privacy delete-all --confirm` — GDPR erasure (local + backend)
-- `bash shell privacy consent-agree <version>` — record consent (called from init flow)
-- `bash shell privacy consent-decline` — permanent local-only mode
+- `node scripts/shell.js privacy status` — consent + trusted skills list
+- `node scripts/shell.js privacy trust <skillId>` — allow unredacted access
+- `node scripts/shell.js privacy untrust <skillId>` — revoke
+- `node scripts/shell.js privacy delete-all --confirm` — GDPR erasure (local + backend)
+- `node scripts/shell.js privacy consent-agree <version>` — record consent (called from init flow)
+- `node scripts/shell.js privacy consent-decline` — permanent local-only mode
 
 ### First-install consent flow
 
@@ -101,8 +101,8 @@ When shell returns `status: "consent_required"`:
 2. Present two explicit options:
    - **Agree** — Mapick uploads anonymous behavior data, returns recommendations.
    - **Decline** — local-only mode (scan / clean / uninstall, no backend).
-3. Agree → `bash shell privacy consent-agree 1.0`.
-4. Decline → `bash shell privacy consent-decline`. Tell user what's still local; **do not re-prompt next session**.
+3. Agree → `node scripts/shell.js privacy consent-agree 1.0`.
+4. Decline → `node scripts/shell.js privacy consent-decline`. Tell user what's still local; **do not re-prompt next session**.
 5. Undecided this session → state stays undecided; next `init` will prompt. **Do not nag in one session.**
 
 ### Local-only mode
@@ -129,7 +129,7 @@ Short table: consent version + agreed-at; trusted skills (bullets); redaction en
 Before executing, **re-state destructive scope** in user's language:
 > This will delete: local CONFIG.md, scan cache, recommendations cache, trash folder, AND your data on Mapick's backend (events, skill records, consents, trusted skills, recommendation feedback, share reports). It cannot be undone.
 
-Only after user confirms a second time, run `bash shell privacy delete-all --confirm`. Report which tables were cleared.
+Only after user confirms a second time, run `node scripts/shell.js privacy delete-all --confirm`. Report which tables were cleared.
 
 ---
 
@@ -220,7 +220,7 @@ Command: `/mapick security:report <skillId> <reason> <evidenceEn>`
 
 ### Intent: status
 Triggers: status, overview, dashboard, my skills, how am I doing.
-Command: `bash shell status` · Backend: `GET /assistant/status/:userId`
+Command: `node scripts/shell.js status` · Backend: `GET /assistant/status/:userId`
 
 ### Rendering (status)
 
@@ -306,7 +306,7 @@ Rendering: skill names + ✅ installed / ⚠️ failed (short reason). User's la
 
 ### Intent: clean
 Triggers: clean, zombies, dead skills, prune.
-Command: `bash shell clean` · Backend: `GET /user/:userId/zombies`
+Command: `node scripts/shell.js clean` · Backend: `GET /user/:userId/zombies`
 
 ### Rendering (clean)
 
@@ -331,7 +331,7 @@ When user replies:
 
 ### Intent: uninstall
 Triggers: uninstall, remove skill, delete skill.
-Command: `bash shell uninstall <skillId> --confirm`
+Command: `node scripts/shell.js uninstall <skillId> --confirm`
 
 Default `--scope both` (user + project). **Do not** ask user about scope.
 
@@ -339,9 +339,9 @@ Default `--scope both` (user + project). **Do not** ask user about scope.
 
 ## 8. Workflow / Daily / Weekly
 
-- **workflow**: `bash shell workflow` — frequent sequences. Triggers: workflow, routine, pipeline, skill chain.
-- **daily**: `bash shell daily` — today's digest. Triggers: daily, today, yesterday.
-- **weekly**: `bash shell weekly` — week summary. Triggers: weekly, this week, last week.
+- **workflow**: `node scripts/shell.js workflow` — frequent sequences. Triggers: workflow, routine, pipeline, skill chain.
+- **daily**: `node scripts/shell.js daily` — today's digest. Triggers: daily, today, yesterday.
+- **weekly**: `node scripts/shell.js weekly` — week summary. Triggers: weekly, this week, last week.
 
 Render in user's language, 3-5 bullets max, no decorative emojis or dividers.
 
@@ -354,7 +354,7 @@ Cron registered automatically on first `consent-agree` (and as safety net on eve
 openclaw cron add --name mapick-notify --cron "0 9 * * *" \
   --session isolated --message "Run /mapick notify"
 ```
-On fire, agent receives "Run /mapick notify" → run `bash shell notify` → `GET /notify/daily-check?currentVersion=<v>`. Without `x-device-fp` (or consent), response only has version alert.
+On fire, agent receives "Run /mapick notify" → run `node scripts/shell.js notify` → `GET /notify/daily-check?currentVersion=<v>`. Without `x-device-fp` (or consent), response only has version alert.
 
 Output:
 ```json
@@ -380,7 +380,7 @@ No JSON echo. No "your daily Mapick check found:" preamble. No timestamps, no ru
 
 ## Auto-trigger on new conversation
 
-Auto-run `bash shell init` when AI detects a new Mapick session (idempotent, 30-min cooldown):
+Auto-run `node scripts/shell.js init` when AI detects a new Mapick session (idempotent, 30-min cooldown):
 - `first_install` → render per §5.
 - `rescanned`, `changed: true` → briefly mention what changed.
 - `rescanned`, `changed: false` / `skip` → silent.
@@ -391,18 +391,18 @@ Auto-run `bash shell init` when AI detects a new Mapick session (idempotent, 30-
 
 After init, if CONFIG.md lacks `first_run_complete`:
 
-1. Run `bash shell summary`.
+1. Run `node scripts/shell.js summary`.
 2. Display `data` payload as the summary card (below) in user's language.
 3. Immediately after, ask (same response):
    "Quick question — what does your typical work day look like? This helps me recommend skills that match YOUR workflow, not just what's popular." (2 examples, offer skip)
 4. If user describes workflow:
-   - `bash shell profile set "<answer verbatim>"`
-   - `bash shell recommend --with-profile`
+   - `node scripts/shell.js profile set "<answer verbatim>"`
+   - `node scripts/shell.js recommend --with-profile`
    - For each rec, connect to user's words: "You said you review PRs → code-review automates that".
    - Mark covered tasks: "You said bug tracking → you already have github ✅".
    - End: "Filling these N gaps covers your full workflow. Reply 'install all' or pick numbers."
-5. If skipped: `bash shell profile set "skipped"`, proceed normally.
-6. `bash shell first-run-done` (one-time flag).
+5. If skipped: `node scripts/shell.js profile set "skipped"`, proceed normally.
+6. `node scripts/shell.js first-run-done` (one-time flag).
 
 If `first_run_complete` exists: skip all of the above.
 
@@ -475,7 +475,7 @@ User-facing:
 Internal (AI invokes; users don't type):
 `clean:track <skillId>` · `bundle:track-installed <id>` · `summary` · `profile set/get` · `first-run-done` · `recommend --with-profile` · `recommend:track <recId> <skillId> installed` · `security:report` · `notify` · `share <reportId> <htmlFile> [locale]`
 
-Debug: `bash shell id` (local device fingerprint).
+Debug: `node scripts/shell.js id` (local device fingerprint).
 
 ---
 

@@ -164,7 +164,7 @@ for item in "${INSTALL_ITEMS[@]}"; do
 done
 
 # Ensure entry scripts are executable
-for exe in scripts/shell scripts/shell.js scripts/redact.js; do
+for exe in scripts/shell.js scripts/redact.js; do
   [[ -f "${target_dir}/${exe}" ]] && chmod +x "${target_dir}/${exe}"
 done
 
@@ -179,7 +179,7 @@ fi
 # GitHub release at runtime. Plain text, single line.
 echo "${VERSION}" > "${target_dir}/.version"
 
-if [[ ! -f "${target_dir}/SKILL.md" ]] || [[ ! -f "${target_dir}/scripts/shell" ]]; then
+if [[ ! -f "${target_dir}/SKILL.md" ]] || [[ ! -f "${target_dir}/scripts/shell.js" ]]; then
   error "Installation failed (required files missing after copy)."
 fi
 
