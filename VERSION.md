@@ -2,6 +2,16 @@
 
 All notable changes to Mapick will be documented in this file.
 
+## v0.0.4 - 2026-04-28
+
+### Fixed
+
+- `notify` was getting mapickii's release tag instead of mapick's because the backend default was hardcoded to `mapick-ai/mapickii`. mapick now sends `?repo=mapick-ai/mapick` on every `/notify/daily-check` call so the backend (post mapick-api PR #18) returns this Skill's actual latest release. Requires api.mapick.ai with mapick-api PR #18 deployed.
+
+### Changed
+
+- `API_BASE` now reads `MAPICK_API_BASE` env var (default still `https://api.mapick.ai/api/v1`). Was hardcoded; this matches mapickii's behavior and lets contributors point a local install at a dev backend without editing the script.
+
 ## v0.0.3 - 2026-04-28
 
 ### Fixed

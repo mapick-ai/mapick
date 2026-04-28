@@ -15,7 +15,8 @@ const CONFIG_DIR = path.dirname(__dirname);
 const CONFIG_FILE = path.join(CONFIG_DIR, "CONFIG.md");
 const TRASH_DIR = path.join(CONFIG_DIR, "trash");
 const REDACTJS_PATH = path.join(CONFIG_DIR, "redact.js");
-const API_BASE = "https://api.mapick.ai/api/v1";
+const API_BASE =
+  process.env.MAPICK_API_BASE || "https://api.mapick.ai/api/v1";
 // Detect the skills install directory: openclaw / claude / codex live in different paths per platform.
 // Priority: env override -> ~/.openclaw -> ~/.claude -> ~/.codex; falls back to .openclaw if none exist.
 // Default candidate is created on first install.
@@ -639,10 +640,13 @@ async function main() {
       try {
         installedVer = fs.readFileSync(versionFile, "utf8").trim();
       } catch {}
-      const qs = installedVer
-        ? `?currentVersion=${encodeURIComponent(installedVer)}`
-        : "";
-      const resp = await httpCall("GET", `/notify/daily-check${qs}`);
+      // Always send `repo` so the backend can fetch our own release stream
+      // (the endpoint maintains a per-repo allowlist; mapick-ai/mapick is the
+      // identifier for this Skill). Without it the backend returns alerts: [].
+      const params = new URLSearchParams();
+      if (installedVer) params.set("currentVersion", installedVer);
+      params.set("repo", "mapick-ai/mapick");
+      const resp = await httpCall("GET", `/notify/daily-check?${params}`);
       // Backend or network failure → silent empty alerts (silence-first).
       if (resp.error) {
         result = { intent: "notify", alerts: [] };
