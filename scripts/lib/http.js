@@ -187,18 +187,18 @@ async function httpCall(method, endpoint, body = null) {
             error: "network_error",
             message: err ? err.message : "no_status_code",
           };
-        } else if (code === 401) {
-          result = { error: "unauthorized", statusCode: 401 };
-        } else if (code === 404) {
-          result = { error: "not_found", statusCode: 404 };
-        } else if (code === 429) {
-          result = { error: "rate_limit", statusCode: 429 };
         } else if (code >= 400) {
+          // Pass backend body through for ALL 4xx/5xx, including 401/404/429.
+          // Fixed shapes for those three used to drop the backend's `message`
+          // / `hint` / `retryAfterSec`, leaving the AI without anything to
+          // tell the user.
+          const stableErrors = { 401: "unauthorized", 404: "not_found", 429: "rate_limit" };
+          const errCode = stableErrors[code] || "http_error";
           try {
             const parsed = JSON.parse(data);
-            result = { error: "http_error", statusCode: code, ...parsed };
+            result = { error: errCode, statusCode: code, ...parsed };
           } catch {
-            result = { error: "http_error", statusCode: code, body: data };
+            result = { error: errCode, statusCode: code, body: data };
           }
         } else {
           try {

@@ -51,7 +51,7 @@
   ], "installed": false }
 ```
 
-**Step 2**: Execute each `installCommands[i].command`, track per-command result, then call `bundle:track-installed <bundleId>`.
+**Step 2**: For each entry, **resolve the canonical slug** per the SKILL.md §1 Install command rule (prefer `installCommands[i].skillId` short form; fall back to last segment of `skillssh:org/repo/skill`; refuse if neither produces a clean short name). Then run `openclaw skills install <slug>` for each — **NEVER** execute the raw `installCommands[i].command` string verbatim, since malformed payloads (`clawhub install skillssh:soultrace-ai/soultrace-skill/soultrace`) leak the same way the recommend install path does. Track per-skill result, then call `bundle:track-installed <bundleId>`.
 
 **Step 3**: Report "Installed N of M skills from bundle <name>."
 

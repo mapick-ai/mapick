@@ -34,9 +34,14 @@ async function handleClean(_args, ctx) {
     "GET",
     `/users/${ctx.fp}/zombies?limit=${OUT_ARR}`,
   );
+  // The previous shape `cleanResp.zombies || cleanResp || []` let backend
+  // error objects ({error, statusCode}) leak through as the zombies array
+  // because `error` is truthy. Pass errors through explicitly; otherwise
+  // accept either a top-level array or {zombies: [...]} shape.
+  if (cleanResp && cleanResp.error) return cleanResp;
   return {
     intent: "clean",
-    zombies: cleanResp.zombies || cleanResp || [],
+    zombies: Array.isArray(cleanResp) ? cleanResp : (cleanResp?.zombies || []),
   };
 }
 

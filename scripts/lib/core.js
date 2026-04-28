@@ -11,7 +11,12 @@ const CONFIG_DIR = path.dirname(path.dirname(__dirname));
 const SCRIPTS_DIR = path.dirname(__dirname);
 const CONFIG_FILE = path.join(CONFIG_DIR, "CONFIG.md");
 const TRASH_DIR = path.join(CONFIG_DIR, "trash");
-const REDACTJS_PATH = path.join(CONFIG_DIR, "redact.js");
+// redact.js lives next to shell.js (scripts/), NOT at CONFIG_DIR root.
+// The CONFIG_DIR-based path silently no-op'd redact() — fs.existsSync
+// returned false → early return — so `share` was uploading raw HTML
+// with zero redaction. countRedactRules() already pointed at SCRIPTS_DIR;
+// REDACTJS_PATH had drifted.
+const REDACTJS_PATH = path.join(SCRIPTS_DIR, "redact.js");
 const API_BASE = "https://api.mapick.ai/api/v1";
 const CACHE_DIR = path.join(os.homedir(), ".mapick", "cache");
 

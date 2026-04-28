@@ -4,6 +4,25 @@
 // Outbound HTTP audit: see lib/http.js function-doc manifest — every
 // network call goes through that single httpCall function.
 
+// Runtime preflight: bail with a structured error on Node < 22.14 (the
+// OpenClaw runtime baseline) instead of letting V8 emit an opaque
+// SyntaxError when newer JS features are parsed. Exit 0 matches the
+// rest of this file's contract (errors are JSON-on-stdout).
+const [_NODE_MAJOR, _NODE_MINOR] = process.versions.node.split(".").map((n) => parseInt(n, 10));
+if (
+  !Number.isFinite(_NODE_MAJOR) ||
+  _NODE_MAJOR < 22 ||
+  (_NODE_MAJOR === 22 && _NODE_MINOR < 14)
+) {
+  console.log(JSON.stringify({
+    error: "node_too_old",
+    required: ">=22.14",
+    got: process.version,
+    hint: "Install Node.js 22.14 or later (OpenClaw runtime baseline) from https://nodejs.org",
+  }));
+  process.exit(0);
+}
+
 const core = require("./lib/core");
 const privacy = require("./lib/privacy");
 const skills = require("./lib/skills");

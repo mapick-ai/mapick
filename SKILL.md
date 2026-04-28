@@ -1,7 +1,7 @@
 ---
 name: mapick
 description: Mapick — Skill recommendation & privacy protection for OpenClaw. Scans your local skills, suggests what you're missing, and keeps other skills from seeing your sensitive data.
-metadata: { "openclaw": { "emoji": "🔍", "requires": { "bins": ["node", "jq", "curl"] }, "permissions": { "network": ["api.mapick.ai"], "file_read": ["~/.openclaw/skills/"], "file_write": ["~/.openclaw/skills/mapick/CONFIG.md", "~/.openclaw/skills/mapick/trash/", "~/.mapick/cache/"] } } }
+metadata: { "openclaw": { "emoji": "🔍", "requires": { "bins": ["node", "curl"], "node": ">=22.14" }, "permissions": { "network": ["api.mapick.ai"], "file_read": ["~/.openclaw/skills/"], "file_write": ["~/.openclaw/skills/mapick/CONFIG.md", "~/.openclaw/skills/mapick/trash/", "~/.mapick/cache/"] } } }
 ---
 
 # Mapick
@@ -12,7 +12,7 @@ Priority: **recommendation = privacy > persona > safety score > cleanup > everyt
 
 - Output reference below is English — render in the user's conversation language.
 - Match every intent trigger in ANY language. Trigger lists are illustrative, not allow-lists.
-- Every `bash shell <subcommand>` execs `scripts/shell` → `node shell.js`. Node.js required.
+- Every `node scripts/shell.js <subcommand>` runs the Mapick Node entrypoint. Node.js (>=22.14) required.
 - Shell responses are single-line JSON. Parse it; never dump raw JSON to the user. Paraphrase errors.
 
 Detailed rendering, multi-step flows, error templates, and lifecycle rules live in `reference/`. Load on demand.
@@ -23,13 +23,22 @@ Detailed rendering, multi-step flows, error templates, and lifecycle rules live 
 
 ### Intent: recommend
 Triggers: recommend, suggest, find skill, what should I install, what am I missing.
-Command: `bash shell recommend [limit]` · cached 24h, force refresh with explicit limit.
+Command: `node scripts/shell.js recommend [limit]` · cached 24h, force refresh with explicit limit.
 
 ### Intent: search
 Triggers: search, find, look for, anything for X.
-Command: `bash shell search <keyword> [limit]`
+Command: `node scripts/shell.js search <keyword> [limit]`
 
-On user pick: extract `installCommands[]` where `platform: "openclaw"`, run it, then `bash shell recommend:track <recId> <skillId> installed`.
+On user pick: **resolve the canonical slug** (see Install command rule below) and run `openclaw skills install <slug>`, then `node scripts/shell.js recommend:track <recId> <skillId> installed`. NEVER pass through raw `installCommands[].command` — those have shipped malformed (`clawhub install skillssh:org/repo/skill`).
+
+### Install command rule (STRICT)
+
+Always render: `openclaw skills install <slug>`. Slug resolution:
+1. Prefer `slug` or canonical short `skillId` (e.g. `code-review`).
+2. Fall back to last segment of `skillssh:org/repo/skill` (e.g. `skillssh:soultrace-ai/soultrace-skill/soultrace` → `soultrace`).
+3. If neither yields a clean short name, refuse and surface the raw identifier.
+
+NEVER show or run: raw `installCommands[].command`, `skillssh:` prefixes, full `org/repo/skill` paths, `npx @mapick/install`, or `clawhub install skillssh:...`. Applies to **both** recommendation install and bundle install.
 
 Rendering: `reference/rendering.md#recommend` and `#search`.
 
@@ -41,13 +50,13 @@ Rendering: `reference/rendering.md#recommend` and `#search`.
 Triggers: privacy, redact, who can see my data, delete my data, forget me, anonymous mode.
 
 ### Subcommands
-- `bash shell privacy status` — consent + trusted skills list
-- `bash shell privacy trust <skillId>` — allow unredacted access
-- `bash shell privacy untrust <skillId>` — revoke
-- `bash shell privacy delete-all --confirm` — GDPR erasure (local + backend)
-- `bash shell privacy consent-agree <version>` — record consent
-- `bash shell privacy consent-decline` — permanent local-only mode
-- `bash shell privacy log [limit]` — show last N outbound HTTP entries (endpoint + field names + status, never values)
+- `node scripts/shell.js privacy status` — consent + trusted skills list
+- `node scripts/shell.js privacy trust <skillId>` — allow unredacted access
+- `node scripts/shell.js privacy untrust <skillId>` — revoke
+- `node scripts/shell.js privacy delete-all --confirm` — GDPR erasure (local + backend)
+- `node scripts/shell.js privacy consent-agree <version>` — record consent
+- `node scripts/shell.js privacy consent-decline` — permanent local-only mode
+- `node scripts/shell.js privacy log [limit]` — show last N outbound HTTP entries (endpoint + field names + status, never values)
 
 ### Redaction
 Before sharing user text with another skill, pipe through `scripts/redact.js`:
@@ -107,7 +116,7 @@ Grade A/B/C rendering details: `reference/rendering.md#security`.
 
 ### Intent: status
 Triggers: status, overview, dashboard, my skills, how am I doing.
-Command: `bash shell status`
+Command: `node scripts/shell.js status`
 
 Lead with verdict (not dashboard). Surface one hidden insight. End with one specific action.
 
@@ -130,7 +139,7 @@ Triggers: bundle, workflow pack, skill pack.
 | `/mapick bundle recommend`    | `bundle:recommend`            |
 | `/mapick bundle install <id>` | `bundle:install <id>`         |
 
-Two-step install: `bundle:install <id>` returns `installCommands[]`; execute each, then `bundle:track-installed <id>`. If all commands fail, do NOT call track-installed.
+Two-step install: `bundle:install <id>` returns `installCommands[]`. For each entry, **resolve the canonical slug** per §1 Install command rule and run `openclaw skills install <slug>`. NEVER execute raw `installCommands[i].command` verbatim. Then call `bundle:track-installed <id>`. If all commands fail, do NOT call track-installed.
 
 Full install flow + failure playbook: `reference/flows.md#bundle-two-step-install`.
 
@@ -140,7 +149,7 @@ Full install flow + failure playbook: `reference/flows.md#bundle-two-step-instal
 
 ### Intent: clean
 Triggers: clean, zombies, dead skills, prune.
-Command: `bash shell clean`
+Command: `node scripts/shell.js clean`
 
 Open with impact (not count). Split: "Never used" vs "Used to be useful". End with: "Reply 'clean all' or pick numbers."
 
@@ -148,7 +157,7 @@ On user pick: `clean:track <skillId>` then `uninstall <skillId> --confirm`.
 
 ### Intent: uninstall
 Triggers: uninstall, remove skill, delete skill.
-Command: `bash shell uninstall <skillId> --confirm`. Default `--scope both`.
+Command: `node scripts/shell.js uninstall <skillId> --confirm`. Default `--scope both`.
 
 Impact-first template: `reference/rendering.md#clean`.
 
@@ -156,9 +165,9 @@ Impact-first template: `reference/rendering.md#clean`.
 
 ## 8. Workflow / Daily / Weekly
 
-- **workflow**: `bash shell workflow` — frequent sequences. Triggers: workflow, routine, pipeline, skill chain.
-- **daily**: `bash shell daily` — today's digest. Triggers: daily, today, yesterday.
-- **weekly**: `bash shell weekly` — week summary. Triggers: weekly, this week, last week.
+- **workflow**: `node scripts/shell.js workflow` — frequent sequences. Triggers: workflow, routine, pipeline, skill chain.
+- **daily**: `node scripts/shell.js daily` — today's digest. Triggers: daily, today, yesterday.
+- **weekly**: `node scripts/shell.js weekly` — week summary. Triggers: weekly, this week, last week.
 
 3-5 bullets max, no decorative emojis or dividers.
 
@@ -172,7 +181,7 @@ openclaw cron add --name mapick-notify --cron "0 9 * * *" \
   --session isolated --message "Run /mapick notify"
 ```
 
-On fire: `bash shell notify` → `GET /notify/daily-check?currentVersion=<v>`.
+On fire: `node scripts/shell.js notify` → `GET /notify/daily-check?currentVersion=<v>`.
 
 **Silence-first**: `alerts: []` → output absolutely nothing (no acknowledgement). Empty AI output ⇒ no message delivered.
 
@@ -184,9 +193,9 @@ Templates: `reference/rendering.md#notify-silence-first`.
 
 ## Auto-trigger / First-run
 
-On new Mapick session, run `bash shell init` (idempotent, 30-min cooldown). Detail: `reference/lifecycle.md#auto-trigger-on-new-conversation`.
+On new Mapick session, run `node scripts/shell.js init` (idempotent, 30-min cooldown). Detail: `reference/lifecycle.md#auto-trigger-on-new-conversation`.
 
-If CONFIG.md lacks `first_run_complete`: run `bash shell summary`, render the summary card, ask one workflow question, then on answer call `profile set` + `recommend --with-profile` + `first-run-done`. Output summary AND question in a SINGLE response.
+If CONFIG.md lacks `first_run_complete`: run `node scripts/shell.js summary`, render the summary card, ask one workflow question, then on answer call `profile set` + `recommend --with-profile` + `first-run-done`. Output summary AND question in a SINGLE response.
 
 Full 6-step flow: `reference/flows.md#first-run-summary`.
 Summary card layout: `reference/rendering.md#summary-card`.
@@ -217,7 +226,7 @@ User-facing:
 Internal (AI invokes; users don't type):
 `clean:track <skillId>` · `bundle:track-installed <id>` · `summary` · `profile set/get` · `first-run-done` · `recommend --with-profile` · `recommend:track <recId> <skillId> installed` · `security:report` · `notify` · `share <reportId> <htmlFile> [locale]`
 
-Debug: `bash shell id`.
+Debug: `node scripts/shell.js id`.
 
 ---
 
