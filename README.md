@@ -120,19 +120,20 @@ Then just talk to your agent in any language:
 
 ### 🔒 Privacy protection
 
-Every skill you install runs in the same conversation context, legitimately reading everything you do. Mapick adds a redaction layer before data leaves your machine — regardless of whether other skills are malicious or not, your sensitive information comes out as `[REDACTED]`.
+Mapick is **opt-out**. Install + first `/mapick` works immediately — no consent prompts, no checkboxes. Anonymous skill IDs + timestamps flow to `api.mapick.ai` so personalized recommendations work. Sensitive content stays local.
 
-```
-you: Is my data safe?
+**What's collected** (default):
+- Skill IDs (which skills you have installed)
+- Invocation timestamps (when each skill was used)
+- Anonymous device fingerprint (a hash of host + platform — not personally identifiable)
 
-mapick: ✅ Privacy status
-  Redaction engine: running (23 rules)
-  Data sent: skill IDs + timestamps only (anonymized)
-  API keys / SSH keys / national IDs → [FILTERED]
-  Source audit: scripts/redact.js
-```
+**What's never collected:**
+- File contents
+- Conversation history
+- API keys, credentials, or any secrets
+- Your name, email, or identity
 
-The redaction engine (`scripts/redact.js`) pattern-matches 20+ secret types and replaces them with `[REDACTED]` before transmission:
+Before any data leaves your machine, `scripts/redact.js` pattern-matches 20+ secret types and replaces them with `[REDACTED]`:
 
 - API keys — OpenAI, Anthropic, Stripe, AWS, GitHub, Slack, GLM (Zhipu)
 - SSH keys, PEM certificates, JWT tokens
@@ -143,12 +144,30 @@ The redaction engine (`scripts/redact.js`) pattern-matches 20+ secret types and 
 
 The code is open source. You can read every rule, verify every pattern, and add your own.
 
-Decline all data sharing at any time:
+```
+you: Is my data safe?
+
+mapick: ✅ Privacy status
+  Mode:               default (opt-out)
+  Data sent:          anonymous skill IDs + timestamps only
+  Local filter:       scripts/redact.js (23 rules)
+  Sensitive content:  filtered to [REDACTED] before transmission
+  Read more:          mapick.ai/privacy
+```
+
+**Opt out at any time:**
 
 ```
-/mapick privacy consent-decline      → local-only mode (cleanup + security still work)
-/mapick privacy delete-all --confirm → GDPR Article 17: delete everything
+/mapick privacy decline              → no x-device-fp sent; personalized features degrade
+/mapick privacy enable               → re-enable after a previous decline
+/mapick privacy delete-all --confirm → GDPR Article 17: delete everything (local + backend)
 ```
+
+After `/mapick privacy decline`:
+- `recommend` falls back to anonymous popularity (no personalization, but still useful)
+- `report` and `share` refuse with a hint to re-enable
+- `clean` falls back to a local last-modified heuristic
+- `search`, `bundle`, `scan`, `privacy *`, `uninstall` keep working unchanged
 
 ### 🎯 Smart recommendations
 
@@ -362,7 +381,7 @@ Mapick's skill-side code — everything that runs on your machine — is fully o
 | Invocation counts (usage frequency) | API keys or credentials  |
 | Anonymized device fingerprint       | Name, email, or identity |
 
-All data passes through `redact.js` before transmission. Decline everything: `/mapick privacy consent-decline`. Delete everything: `/mapick privacy delete-all --confirm`.
+All data passes through `redact.js` before transmission. Opt out anytime: `/mapick privacy decline`. Delete everything: `/mapick privacy delete-all --confirm`.
 
 ---
 

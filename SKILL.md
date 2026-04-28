@@ -106,35 +106,89 @@ Last `recommend` response cached 24h. Force refresh by passing an explicit limit
 
 ## 2. Privacy Protection
 
+### Privacy model: opt-out, transparent disclosure
+
+Mapick is **opt-out by default**. The first `/mapick` call works immediately — no consent gate, no upfront prompt. Anonymous data (skill IDs + timestamps + device fingerprint, no PII) flows to `api.mapick.ai` so personalized features work. The user can opt out at any time.
+
+This is the same model as most SaaS telemetry: install + use → implied agreement, with one-click opt-out.
+
 ### Intent: privacy
-Triggers: privacy, redact, who can see my data, delete my data, forget me, anonymous mode.
+Triggers: privacy, redact, who can see my data, delete my data, forget me, opt out, anonymous mode.
 
 ### Subcommands
-- `node scripts/shell.js privacy status` — consent + trusted skills list
-- `node scripts/shell.js privacy trust <skillId>` — allow unredacted access
-- `node scripts/shell.js privacy untrust <skillId>` — revoke
+- `node scripts/shell.js privacy status` — show current mode + trusted skills + disclosure
+- `node scripts/shell.js privacy decline` — opt out of data sharing (suppresses `x-device-fp`)
+- `node scripts/shell.js privacy enable` — opt back in after a previous decline
+- `node scripts/shell.js privacy trust <skillId>` — allow unredacted content for this skill
+- `node scripts/shell.js privacy untrust <skillId>` — revoke trust
 - `node scripts/shell.js privacy delete-all --confirm` — GDPR erasure (local + backend)
-- `node scripts/shell.js privacy consent-agree <version>` — record consent (called from init flow)
-- `node scripts/shell.js privacy consent-decline` — permanent local-only mode
+- `node scripts/shell.js privacy disable-redact` / `enable-redact` — toggle local redaction (advanced)
 
-### First-install consent flow
+### First-run disclosure (mandatory)
 
-When shell returns `status: "consent_required"`:
+The first-run summary card MUST include a one-line privacy disclosure inline. This is the legal disclosure that makes opt-out compliant — AI MUST NOT omit it.
 
-1. Show `consentText` in the user's language (translate literally — substance: anonymous, no code, no conversations, deletable).
-2. Present two explicit options:
-   - **Agree** — Mapick uploads anonymous behavior data, returns recommendations.
-   - **Decline** — local-only mode (scan / clean / uninstall, no backend).
-3. Agree → `node scripts/shell.js privacy consent-agree 1.0`.
-4. Decline → `node scripts/shell.js privacy consent-decline`. Tell user what's still local; **do not re-prompt next session**.
-5. Undecided this session → state stays undecided; next `init` will prompt. **Do not nag in one session.**
+When shell returns `status: "first_install"` with a `privacy.disclosure` field, render the summary card and append the disclosure as the LAST line of the card, separated by a soft divider:
 
-### Local-only mode
+```
+🔒 你的数据：只传 Skill ID + 时间戳（匿名），敏感字段(API Key 等)自动过滤。
+   详情: /mapick privacy status · 退出: /mapick privacy decline
+```
 
-If `init` returns `status: "local_only"` (or any command returns `error: "disabled_in_local_mode"`):
-- Confirm local-only state **once** per session.
-- Backend-needing commands (`recommend` / `search` / `bundle install` / `recommend:track` / `privacy trust`): refuse with "this requires consent; run `/mapick privacy consent-agree 1.0`".
-- Local-only commands (`status` / `scan` / `clean` / `uninstall` / `privacy status` / `privacy delete-all`): proceed normally.
+Translate to the user's language but preserve substance: (1) what's collected, (2) what's filtered, (3) where to read more, (4) how to opt out. Always show all four.
+
+### Declined mode behavior
+
+When the user has run `/mapick privacy decline` (`config.consent_declined: true`), the skill enters `declined` mode:
+
+- `x-device-fp` header is suppressed on outgoing requests.
+- Per-command behavior:
+  - `recommend`: backend returns anonymous popularity (`anonymous: true` in the response) — render with the **declined recommend funnel** below.
+  - `report`, `share`: refuse with structured error `error: "declined"` — render as "this needs personalization; run `/mapick privacy enable` to re-enable."
+  - `clean`: shell falls back to local last-modified heuristic; response contains `local_heuristic: true` and a `notice` — surface that notice so the user knows accuracy is reduced.
+  - `search`, `bundle` (list/detail/install): work normally (no fp needed).
+  - `scan`, `privacy *`, `uninstall`, `id`, `help`: unaffected.
+
+### Rendering (declined recommend funnel)
+
+When shell returns `{intent: "recommend", anonymous: true, items: [...], show_funnel?: bool}`:
+
+1. Open: "你选择了 privacy decline,这是 ClawHub 上的通用热门(没有个性化):"
+2. Render 3 items max — same 2-sentence format as personalized recommend, BUT first sentence is "X teams use this, mostly for Y" (popularity framing) instead of "you do Z manually."
+3. **If `show_funnel: true`**, append the opt-in funnel block:
+   ```
+   💡 启用数据共享后,推荐会变成基于你实际工作的:
+      "你本周 review 了 23 次 PR,每次 ~15 分钟。装 code-review
+       能用 1 个评论替代手工挑刺,大约省 5.7 小时/周。"
+
+   启用 → /mapick privacy enable(可随时再 decline,数据可一键删除)
+   ```
+   The synthetic personalized example sentence MUST be plausible but not specific to this user's data (they have none on file). Rotate from a small pool of plausible patterns to avoid feeling scripted.
+4. **If `show_funnel: false` (default for non-cadence calls)**, skip the funnel block — just the 3 items + disclosure header.
+
+The funnel cadence (1st call after decline + every 5th call) is enforced shell-side via `declined_recommend_count` in CONFIG.md; AI just trusts the `show_funnel` field.
+
+### Rendering (privacy:status)
+
+Render an info card, NOT a gate. Include:
+- Current mode: `default` (opt-out, data flows) or `declined` (opt-out engaged, no fp sent).
+- Trusted skills list (bullets) if non-empty.
+- The `disclosure` field as a quotable "what's collected" paragraph.
+- If `legacy_consent_version` is non-null (pre-pivot user who once explicitly agreed): one line "📜 You previously agreed to v{X} on {date}; that record is historical and doesn't affect current behavior."
+- Action commands (decline / enable / delete-all) at the bottom.
+
+### Rendering (privacy:decline)
+
+Confirm the user is now in `declined` mode. Mention:
+- `x-device-fp` is no longer being sent.
+- Personalized commands degrade per the table above.
+- They can re-enable with `/mapick privacy enable` anytime.
+
+### Rendering (privacy:enable)
+
+Confirm the user is back to default mode. Mention:
+- `x-device-fp` is sent again on personalized calls.
+- Daily notify cron has been re-registered.
 
 ### Redaction engine (local only)
 
@@ -145,9 +199,6 @@ echo "$USER_TEXT" | node ~/.openclaw/skills/mapick/scripts/redact.js
 Strips API keys (Anthropic / OpenAI / Stripe / GitHub / AWS / Slack / OpenAI org), JWT, SSH keys, PEM private keys, URL query tokens, DB connection strings, emails, credit cards, Chinese national IDs, Chinese mobile, international phones, `password=...` config lines. Local regex only, zero network, <1ms. Best-effort, not absolute.
 
 **Skills in `trustedSkills` are exempt** — user authorized them via `/mapick privacy trust <skillId>`.
-
-### Rendering (privacy:status)
-Short table: consent version + agreed-at; trusted skills (bullets); redaction engine name. If `consent.declined: true`: "You declined consent. Mapick is in local-only mode." Close with: "Delete everything: ask me to run `privacy delete-all`."
 
 ### Rendering (privacy:delete-all)
 Before executing, **re-state destructive scope** in user's language:
@@ -269,18 +320,24 @@ Shell returns:
 ```json
 {
   "status": "first_install",
-  "data": { "deviceFingerprint": "...", "skillsCount": 3, "skillNames": ["tasa", "mapick", "stage"] },
-  "privacy": "Anonymous by design. No registration. ..."
+  "data": { "skillsCount": 3, "skillNames": ["tasa", "mapick", "stage"] },
+  "privacy": {
+    "mode": "default",
+    "disclosure": "Mapick sends anonymous skill IDs + timestamps to api.mapick.ai. Sensitive content (API keys, paths, etc.) is filtered locally. Run /mapick privacy status for details, /mapick privacy decline to opt out."
+  }
 }
 ```
 
 Render in user's language:
+
 1. Greet warmly, one sentence. ("Mapick is ready.")
 2. Mention scan + `skillsCount` skills found. If `>0`, list up to 5 from `skillNames`. If `0`, say canvas is empty and offer discovery.
 3. One next step. ("Try `/mapick recommend` to see what might help you.")
-4. Include `privacy` line verbatim (translate literally — substance: anonymous, no registration).
+4. **MANDATORY** privacy disclosure footer, separated from the rest by a soft divider. Translate substance from `privacy.disclosure` to user's language but always include all four points: (a) what's collected (anonymous skill IDs + timestamps), (b) what's filtered locally (sensitive content), (c) where to read more (`/mapick privacy status`), (d) how to opt out (`/mapick privacy decline`).
 
-**Do not** render any ASCII logo, prompt for registration, or auto-call follow-up commands.
+The disclosure is the legal anchor of the opt-out model — AI MUST NOT omit it from the first-install card. Subsequent `/mapick` calls don't need to repeat it (privacy status is one command away).
+
+**Do not** render any ASCII logo, prompt for registration, ask for consent, or auto-call follow-up commands. The opt-out model means the user is implicitly opted in by default — never ask them to "agree."
 
 ---
 

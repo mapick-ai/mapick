@@ -80,20 +80,10 @@ const VALID_EVENT_ACTIONS = [
   "sequence_pattern",
 ];
 const PROTECTED_SKILLS = ["mapick", "tasa"];
-const REMOTE_COMMANDS = new Set([
-  "recommend",
-  "recommend:track",
-  "search",
-  "workflow",
-  "daily",
-  "weekly",
-  "report",
-  "security",
-  "security:report",
-  "clean",
-  "clean:track",
-  "share",
-]);
+// REMOTE_COMMANDS removed in the opt-out pivot (#31). The skill no longer
+// gates a fixed set of "remote" commands behind a consent check; instead,
+// each command handles `declined` mode individually (refuse, anonymous
+// fallback, or local heuristic — see DECLINED_REFUSE_COMMANDS below).
 
 function deviceFp() {
   const config = readConfig();
@@ -175,6 +165,13 @@ async function httpCall(method, endpoint, body = null) {
   const url = new URL(endpoint.replace(/^\//, ""), base);
   const STATUS_DELIM = "___MAPICK_HTTP_STATUS___";
 
+  // Opt-out privacy model: send x-device-fp by default; suppress only when the
+  // user has explicitly run `privacy decline`. Backend's anonymous endpoints
+  // (e.g. /recommendations/feed without fp returns popularity) handle the no-fp
+  // case; personalized commands fall back per-command in declined mode.
+  const cfg = readConfig();
+  const declined = cfg.consent_declined === "true";
+
   // -s silent, -S still show errors, -L follow redirects, -m timeout.
   // Append %{http_code} after a unique delimiter so we can split the body
   // from the status code without worrying about embedded newlines in JSON.
@@ -183,7 +180,7 @@ async function httpCall(method, endpoint, body = null) {
     "-X", method,
     "-m", "15",
     "-H", "Content-Type: application/json",
-    "-H", `x-device-fp: ${deviceFp()}`,
+    ...(declined ? [] : ["-H", `x-device-fp: ${deviceFp()}`]),
     "-w", `\n${STATUS_DELIM}%{http_code}`,
     url.toString(),
   ];
@@ -377,8 +374,9 @@ async function aggregateSummary(skills, config) {
     has_backend: false,
   };
 
-  // Backend enrichment: top_used + security A/B/C counts. Skipped entirely without consent.
-  if (!hasConsent(config) || isConsentDeclined(config)) return summary;
+  // Backend enrichment: top_used + security A/B/C counts. Skipped only when
+  // the user has explicitly declined data sharing (opt-out model).
+  if (isDeclined(config)) return summary;
 
   const fp = deviceFp();
   try {
@@ -394,33 +392,25 @@ async function aggregateSummary(skills, config) {
   return summary;
 }
 
-function isConsentDeclined(config) {
+// Opt-out privacy model: the only state that matters is "did the user
+// explicitly decline?" There is no opt-in gate; personalized features are
+// available by default and the user can decline at any time via
+// `/mapick privacy decline`.
+function isDeclined(config) {
   return config.consent_declined === "true";
 }
 
-function hasConsent(config) {
-  return Boolean(config.consent_version);
-}
+// Personalized commands that have no meaningful anonymous fallback. In
+// declined mode they refuse with a hint pointing at `privacy enable`.
+// `recommend` is intentionally NOT in this set — it has an anonymous
+// popularity fallback path (see recommend case).
+const DECLINED_REFUSE_COMMANDS = new Set(["report", "share"]);
 
-function isRemoteCommand(command, args) {
-  if (REMOTE_COMMANDS.has(command)) return true;
-  if (command === "bundle") return true;
-  if (command === "privacy" && ["trust"].includes(args[0])) return true;
-  return false;
-}
-
-function remoteAccessError(config) {
-  if (isConsentDeclined(config)) {
-    return {
-      error: "disabled_in_local_mode",
-      mode: "local_only",
-      hint: "This command requires consent. Run: privacy consent-agree 1.0",
-    };
-  }
-
+function declinedRefusal(command) {
   return {
-    error: "consent_required",
-    hint: "This command requires consent. Run: privacy consent-agree 1.0",
+    error: "declined",
+    intent: command,
+    hint: "This command needs personalization data (currently disabled). Run: /mapick privacy enable to re-enable.",
   };
 }
 
@@ -486,24 +476,49 @@ async function main() {
   const fp = deviceFp();
   let result;
 
-  if (isRemoteCommand(COMMAND, ARGS) && (!hasConsent(config) || isConsentDeclined(config))) {
-    console.log(JSON.stringify(remoteAccessError(config)));
+  // Opt-out privacy model: no consent gate here. Personalized commands handle
+  // declined mode individually — `recommend` falls back to anonymous popularity,
+  // `report`/`share` refuse with an opt-in hint, `clean` falls back to local
+  // last-modified heuristic, etc. See per-case logic below.
+  if (isDeclined(config) && DECLINED_REFUSE_COMMANDS.has(COMMAND)) {
+    console.log(JSON.stringify(declinedRefusal(COMMAND)));
     return;
   }
 
   switch (COMMAND) {
     case "init":
     case "status":
-      const lastInit = config.last_init_at
-        ? new Date(config.last_init_at).getTime()
+      // Cooldown design (per #31):
+      //   - last_init_success_at: written ONLY on completed init. Drives the
+      //     30-min "we already greeted this session" idempotency window.
+      //   - last_init_attempt_at: written before each attempt regardless of
+      //     outcome. Rate-limits retry storms (30s minimum between attempts).
+      //   - last_init_at: legacy field; read for backward compat with old
+      //     installs but no longer written.
+      //
+      // Old bug being fixed: a coarse last_init_at written BEFORE doing
+      // actual work meant any failure (network, scan error) locked the user
+      // out of retry for 30 min and the skill looked dead.
+      const lastSuccessTs = config.last_init_success_at
+        ? new Date(config.last_init_success_at).getTime()
+        : config.last_init_at
+          ? new Date(config.last_init_at).getTime()
+          : 0;
+      const lastAttemptTs = config.last_init_attempt_at
+        ? new Date(config.last_init_attempt_at).getTime()
         : 0;
-      const cooldown =
+      const successCooldown =
         parseInt(process.env.MAPICK_INIT_INTERVAL_MINUTES || "30") * 60000;
-      if (Date.now() - lastInit < cooldown) {
+      const attemptCooldown = 30_000; // 30s retry-storm guard
+      if (Date.now() - lastSuccessTs < successCooldown) {
         result = { status: "skip", reason: "cooldown" };
         break;
       }
-      writeConfig("last_init_at", isoNow());
+      if (Date.now() - lastAttemptTs < attemptCooldown) {
+        result = { status: "skip", reason: "retry_rate_limited" };
+        break;
+      }
+      writeConfig("last_init_attempt_at", isoNow());
       const skills = scanSkills();
       if (!config.device_fp) {
         writeConfig("created_at", isoNow());
@@ -513,7 +528,14 @@ async function main() {
             skillsCount: skills.length,
             skillNames: skills.slice(0, 5).map((s) => s.name),
           },
-          privacy: "Anonymous by design. No registration.",
+          // Inline privacy disclosure for the AI to render in the first-run
+          // summary card (mandatory per #31). Opt-out model: data flows by
+          // default, user can decline anytime.
+          privacy: {
+            mode: isDeclined(config) ? "declined" : "default",
+            disclosure:
+              "Mapick sends anonymous skill IDs + timestamps to api.mapick.ai. Sensitive content (API keys, paths, etc.) is filtered locally. Run /mapick privacy status for details, /mapick privacy decline to opt out.",
+          },
         };
       } else {
         // Compute zombie / activation_rate / never_used for real, replacing the previous hardcoded 0/binary fallback.
@@ -543,16 +565,18 @@ async function main() {
           never_used: skills.filter((s) => !s.last_modified).length,
         };
 
-        // Safety net: re-register the notify cron on every consented init.
+        // Safety net: re-register the notify cron on every successful init.
         // Recovers from cases where the user deleted the cron, the previous
-        // consent-agree call ran before openclaw was installed, or a fresh
-        // host needs to inherit the schedule. registerNotifyCron is idempotent
+        // attempt ran before openclaw was installed, or a fresh host needs
+        // to inherit the schedule. registerNotifyCron is idempotent
         // (cron rm + cron add) so repeated calls are cheap. Skipped when
-        // consent isn't yet given.
-        if (hasConsent(config)) {
+        // the user has explicitly declined data sharing.
+        if (!isDeclined(config)) {
           registerNotifyCron();
         }
       }
+      // Mark the attempt as successful (drives the 30-min idempotency window).
+      writeConfig("last_init_success_at", isoNow());
       break;
 
     case "scan":
@@ -565,15 +589,34 @@ async function main() {
       const withProfile = ARGS.includes("--with-profile");
       const numericArgs = ARGS.filter((a) => !a.startsWith("--"));
       const limit = parseInt(numericArgs[0]) || 5;
-      const cacheKey = `recommend_${fp}`;
+      const declined = isDeclined(config);
+      // Cache key differs for personalized vs anonymous so opt-out doesn't
+      // serve a stale personalized response.
+      const cacheKey = declined ? "recommend_anon" : `recommend_${fp}`;
       const cached = readCache(cacheKey);
       // An explicit limit or --with-profile always hits the backend, bypassing the 24h cache.
       const useCache = !withProfile && numericArgs.length === 0;
       if (useCache && cached) {
-        result = { intent: "recommend", items: cached.items, cached: true };
+        result = {
+          intent: "recommend",
+          items: cached.items,
+          cached: true,
+          ...(declined ? { anonymous: true } : {}),
+        };
+        if (declined) {
+          // Funnel cadence: show the opt-in funnel on first declined call after
+          // each decline + every 5th call thereafter. Counter resets to 0 on
+          // privacy enable.
+          const count = parseInt(config.declined_recommend_count || "0", 10) + 1;
+          writeConfig("declined_recommend_count", String(count));
+          if (count === 1 || count % 5 === 0) {
+            result.show_funnel = true;
+          }
+        }
       } else {
         let url = `/recommendations/feed?limit=${limit}`;
-        if (withProfile) {
+        if (!declined && withProfile) {
+          // profileTags only makes sense when we're sending fp anyway.
           const tagsRaw = config.user_profile_tags || "";
           // CONFIG stores a JSON array string; on parse failure, fall back to comma-separated.
           let tags = [];
@@ -590,12 +633,24 @@ async function main() {
         const resp = await httpCall("GET", url);
         if (resp.error) result = resp;
         else {
+          // Backend returns `anonymous: true` when no x-device-fp was sent
+          // (per mapick-ai/mapick-api#20). The skill trusts that signal and
+          // mirrors it; the AI uses it to switch rendering paths.
+          const anon = Boolean(resp.anonymous) || declined;
           result = {
             intent: "recommend",
             items: resp.items || resp.recommendations || [],
-            withProfile,
+            withProfile: declined ? false : withProfile,
+            ...(anon ? { anonymous: true } : {}),
           };
           writeCache(cacheKey, { items: result.items });
+          if (anon) {
+            const count = parseInt(config.declined_recommend_count || "0", 10) + 1;
+            writeConfig("declined_recommend_count", String(count));
+            if (count === 1 || count % 5 === 0) {
+              result.show_funnel = true;
+            }
+          }
         }
       }
       break;
@@ -650,6 +705,32 @@ async function main() {
       break;
 
     case "clean": {
+      // Declined mode: skip the backend (no fp = it can't compute personalized
+      // zombies anyway) and fall back to a local last-modified heuristic.
+      // Honest about the limitation in the response so the AI surfaces it.
+      if (isDeclined(config)) {
+        const zombieDays = parseInt(process.env.MAPICK_ZOMBIE_DAYS || "30", 10);
+        const now = Date.now();
+        const localSkills = scanSkills();
+        const ageDays = (s) =>
+          (now - new Date(s.last_modified).getTime()) / 86_400_000;
+        const zombies = localSkills
+          .filter((s) => ageDays(s) > zombieDays)
+          .map((s) => ({
+            skillId: s.id,
+            name: s.name,
+            last_modified: s.last_modified,
+            days_idle: Math.round(ageDays(s)),
+          }));
+        result = {
+          intent: "clean",
+          zombies,
+          local_heuristic: true,
+          notice:
+            "Personalized zombie detection requires data sharing (currently disabled). Showing local last-modified heuristic only — usage frequency isn't known. Run /mapick privacy enable for accurate detection.",
+        };
+        break;
+      }
       const cleanResp = await httpCall("GET", `/users/${fp}/zombies`);
       // The previous shape `cleanResp.zombies || cleanResp || []` let backend
       // error objects ({error,statusCode}) leak through as the `zombies` array
@@ -851,21 +932,31 @@ async function main() {
       const subCmd = ARGS[0] || "status";
       switch (subCmd) {
         case "status":
+          // Opt-out model: there is no `consent_required` state. The skill is
+          // either default-on (data sharing happens by default) or `declined`
+          // (user explicitly opted out). Legacy `consent_version` may still be
+          // present in CONFIG.md from pre-pivot installs — surfaced as
+          // historical info but not used for any gating.
           result = {
             intent: "privacy:status",
-            consent_version: config.consent_version || null,
-            consent_agreed_at: config.consent_agreed_at || null,
-            consent_declined: config.consent_declined === "true",
-            remote_access:
-              config.consent_declined === "true"
-                ? "local_only"
-                : config.consent_version
-                  ? "enabled"
-                  : "consent_required",
+            mode: config.consent_declined === "true" ? "declined" : "default",
+            declined_at: config.consent_declined_at || null,
+            // Legacy historical info — pre-pivot users may have these set;
+            // they no longer affect behavior. AI may render as
+            // "you previously agreed to v1.0; that record is historical."
+            legacy_consent_version: config.consent_version || null,
+            legacy_consent_agreed_at: config.consent_agreed_at || null,
             trusted_skills: config.trusted_skills
               ? config.trusted_skills.split(",")
               : [],
             redact_disabled: config.redact_disabled === "true",
+            disclosure:
+              "Mapick sends anonymous skill IDs + timestamps to api.mapick.ai. Sensitive content is filtered locally by scripts/redact.js before transmission. No PII, no chat content, no API keys.",
+            commands: {
+              decline: "/mapick privacy decline",
+              enable: "/mapick privacy enable",
+              delete_all: "/mapick privacy delete-all --confirm",
+            },
           };
           break;
 
@@ -930,58 +1021,67 @@ async function main() {
           };
           break;
 
-        case "consent-agree": {
-          // PR-21: previously the httpCall return value was discarded — when the POST failed, CONFIG
-          // was still written as "agreed". Result: no row in user_consents, and later ConsentGuard
-          // calls still 403'd. Now we only write local state on a successful POST; on failure we
-          // surface the backend error so the AI can report reality instead of falsely showing "agreed".
-          const version = ARGS[1] || "1.0";
-          const now = isoNow();
-          const resp = await httpCall("POST", "/users/consent", {
-            consentVersion: version,
-            agreedAt: now,
-          });
-          if (resp && resp.error) {
-            // Skip the local write — keep the "not agreed" state aligned with the backend.
-            result = {
-              intent: "privacy:consent-agree",
-              error: "backend_consent_failed",
-              backend_error: resp.error,
-              backend_message: resp.message ?? null,
-              backend_status: resp.statusCode ?? null,
-              hint: "Backend did not record your consent. Check your network / API base URL, then retry.",
-            };
-            break;
+        // `decline` is the canonical opt-out command. `consent-decline` is
+        // accepted as a deprecated alias so older AI prompts / SKILL.md
+        // references keep working through the transition.
+        case "decline":
+        case "consent-decline": {
+          const declinedAt = isoNow();
+          writeConfig("consent_declined", "true");
+          writeConfig("consent_declined_at", declinedAt);
+          // Reset the funnel counter so the next time the user runs recommend
+          // they see the opt-in funnel on the very first call.
+          deleteConfig("declined_recommend_count");
+          // Best-effort backend notification so the server can stop further
+          // processing for this fp. Failure is non-fatal — the local flag is
+          // the source of truth and outgoing requests no longer carry fp.
+          // After backend mapick-api#19 ships, this writes a UserConsent row
+          // with declined=true, which ConsentGuard then enforces.
+          let backendResp = null;
+          try {
+            backendResp = await httpCall("POST", "/users/consent", {
+              declined: true,
+              declinedAt,
+            });
+          } catch {
+            backendResp = null;
           }
-          writeConfig("consent_version", version);
-          writeConfig("consent_agreed_at", now);
-          deleteConfig("consent_declined");
-          deleteConfig("consent_declined_at");
-          // Register the daily notify cron now that consent is in place.
-          // Failure is non-fatal: consent itself succeeded; the notify cron
-          // can be registered manually later if openclaw is missing.
-          const cronResult = registerNotifyCron();
           result = {
-            intent: "privacy:consent-agree",
-            version,
-            agreedAt: now,
-            // consentId confirmed by the backend (so the AI can tell the user "backend recorded it").
-            consentId: resp?.consentId ?? null,
-            notifyCron: cronResult,
+            intent: "privacy:decline",
+            mode: "declined",
+            declinedAt,
+            backend: backendResp && !backendResp.error ? "recorded" : "best_effort",
           };
           break;
         }
 
-        case "consent-decline":
-          const declinedAt = isoNow();
-          writeConfig("consent_declined", "true");
-          writeConfig("consent_declined_at", declinedAt);
+        // Symmetric opt-in: clears the decline flag. After this, x-device-fp
+        // resumes flowing on outgoing requests and personalized commands work.
+        // Resets the funnel counter so a future decline starts fresh.
+        case "enable": {
+          deleteConfig("consent_declined");
+          deleteConfig("consent_declined_at");
+          deleteConfig("declined_recommend_count");
+          // Best-effort: tell backend to clear the decline record. Same
+          // graceful failure model as decline above.
+          let backendResp = null;
+          try {
+            backendResp = await httpCall("POST", "/users/consent", {
+              declined: false,
+            });
+          } catch {
+            backendResp = null;
+          }
+          // Re-register the notify cron now that we're back to default mode.
+          const cronResult = registerNotifyCron();
           result = {
-            intent: "privacy:consent-decline",
-            mode: "local_only",
-            declinedAt,
+            intent: "privacy:enable",
+            mode: "default",
+            backend: backendResp && !backendResp.error ? "recorded" : "best_effort",
+            notifyCron: cronResult,
           };
           break;
+        }
 
         case "disable-redact":
           writeConfig("redact_disabled", "true");
@@ -1002,7 +1102,7 @@ async function main() {
         default:
           result = {
             error: "unknown_subcommand",
-            hint: "Available: status | trust | untrust | delete-all | consent-agree | consent-decline | disable-redact | enable-redact",
+            hint: "Available: status | decline | enable | trust | untrust | delete-all | disable-redact | enable-redact",
           };
       }
       break;
@@ -1058,8 +1158,12 @@ async function main() {
           // profileText + profileTags (userId is in the path). Previously the path was wrongly
           // /users/profile and always 404'd — local writes succeeded but the backend never received
           // profileTags, so the --with-profile boost on recommend was always 0.
+          // Opt-out model: upload the profile by default (data flows unless
+          // user declined). The httpCall itself drops x-device-fp in declined
+          // mode so the upload becomes useless when declined — short-circuit
+          // here to skip the wasted request.
           let uploaded = false;
-          if (hasConsent(config) && !isConsentDeclined(config)) {
+          if (!isDeclined(config)) {
             const resp = await httpCall("POST", `/users/${fp}/profile-text`, {
               profileText: text,
               profileTags: tags,
@@ -1140,12 +1244,12 @@ Commands:
   report                  Persona report
   share <reportId> <html> [locale]  Upload share page
   security <skillId>      Security score
-  privacy status          Show consent + trusted skills
-  privacy trust <skillId>      Trust a skill
+  privacy status               Show privacy mode + trusted skills + disclosure
+  privacy decline              Opt out of data sharing (resumes anonymous mode)
+  privacy enable               Re-enable data sharing after a previous decline
+  privacy trust <skillId>      Trust a skill (allow unredacted access)
   privacy untrust <skillId>    Revoke trust
-  privacy delete-all --confirm  GDPR erasure
-  privacy consent-agree [version]  Record consent
-  privacy consent-decline      Decline consent (local-only mode)
+  privacy delete-all --confirm GDPR erasure (local + backend data)
   event:track <userId> <action> [skillId]  Record event
   summary                 First-run diagnostic (local + optional backend)
   profile set "<text>"    Save user workflow self-description
