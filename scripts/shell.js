@@ -14,7 +14,12 @@ const { execSync } = require("child_process");
 const CONFIG_DIR = path.dirname(__dirname);
 const CONFIG_FILE = path.join(CONFIG_DIR, "CONFIG.md");
 const TRASH_DIR = path.join(CONFIG_DIR, "trash");
-const REDACTJS_PATH = path.join(CONFIG_DIR, "redact.js");
+// redact.js lives next to this file (scripts/), NOT at CONFIG_DIR root.
+// The previous CONFIG_DIR-based path silently no-op'd redact() on every call
+// (existsSync returned false → early return), so `share` was uploading raw
+// HTML with zero redaction applied. countRedactRules() already used a
+// 2-candidate fallback that included this path; redact() never did.
+const REDACTJS_PATH = path.join(__dirname, "redact.js");
 const API_BASE = "https://api.mapick.ai/api/v1";
 // Detect the skills install directory: openclaw / claude / codex live in different paths per platform.
 // Priority: env override -> ~/.openclaw -> ~/.claude -> ~/.codex; falls back to .openclaw if none exist.
