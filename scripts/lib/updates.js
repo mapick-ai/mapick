@@ -216,9 +216,9 @@ async function handleCheck(_args, ctx) {
 const RM_BY_ID_INSTRUCTION = {
   kind: "instruction",
   instruction:
-    "Run `openclaw cron list --json`. Parse the JSON. For EACH entry whose `name` is `mapick-notify`, run `openclaw cron rm <id>` (using the entry's `id` field). This MUST be by ID — `openclaw cron rm mapick-notify` (by name) silently no-ops. If there are no matching entries, do nothing and continue.",
+    "Run `openclaw cron list --json`. Parse the JSON. For EACH entry whose `name` starts with `mapick-notify` or equals `mapick-daily-notify`, run `openclaw cron rm <id>` (using the entry's `id` field). This MUST be by ID — `openclaw cron rm mapick-notify` (by name) silently no-ops. If there are no matching entries, do nothing and continue.",
   rationale:
-    "Idempotent: removes any pre-existing mapick-notify entries before adding a fresh one, so re-running the plan does not accumulate duplicates.",
+    "Idempotent: removes any pre-existing mapick cron entries (both `mapick-notify` and legacy `mapick-daily-notify`) before adding a fresh one, so re-running the plan does not accumulate duplicates.",
 };
 
 // `notify:plan` — return the cron-registration plan for AI to execute.
@@ -246,6 +246,8 @@ function handleNotifyPlan() {
       "Run `node scripts/shell.js notify:disable` to get the by-id removal plan.",
     after_success_track: "node scripts/shell.js notify:track setup_complete",
     after_failure_rollback: null,
+    delivery:
+      "IMPORTANT: cron delivery requires a configured channel (Telegram, Slack, etc.). In local-only setups without a channel, the cron will execute but notifications cannot reach you. The --best-effort-deliver flag ensures the cron does not block on delivery failures, but you need at least one active channel for notifications to be received. Verify with `openclaw cron list --json` after setup — look for deliveryPreviews with a valid route.",
   };
 }
 
