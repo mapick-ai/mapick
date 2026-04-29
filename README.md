@@ -114,10 +114,15 @@ MAPICK_VERSION=v0.0.15 bash install.sh
 
 ```
 
-Then just talk to your agent in any language:
+Then talk to your agent:
 
 ```
-"Is my data safe?"  "推荐几个"  "Clean up"  "Is X safe?"  "Analyze me"  "Bundles"
+"Is my data safe?"
+"Recommend skills for my workflow"
+"Clean up unused skills"
+"Is this skill safe?"
+"Analyze my persona"
+"Show me bundles"
 ```
 
 **Requirements:** OpenClaw, Node.js (>=22.14, OpenClaw recommends 24), curl.
