@@ -99,6 +99,52 @@ function logOutbound(entry) {
 // Audit-log read side lives in lib/audit.js — keeps file reads out
 // of the module that performs network sends.
 
+// Classify a fetch / Node TLS error into a coarse category so callers
+// (notably `doctor`) can show actionable guidance instead of a raw `cause.code`.
+//
+// Categories:
+//   dns  — name not resolved (EAI_AGAIN, ENOTFOUND, DNS server unreachable)
+//   tcp  — TCP connect failed (ECONNREFUSED, ETIMEDOUT, EHOSTUNREACH, ECONNRESET)
+//   tls  — certificate or handshake failed (UNABLE_TO_VERIFY_LEAF_SIGNATURE,
+//          CERT_HAS_EXPIRED, DEPTH_ZERO_SELF_SIGNED_CERT, …)
+//   abort — request was aborted (15s timeout via AbortController)
+//   unknown — anything we couldn't pin down
+//
+// `proxy` and `unhealthy_payload` are determined at the response layer (HTTP
+// status / body shape), not from a fetch exception, so they're not produced here.
+function classifyFetchError(err) {
+  const code = err?.cause?.code || err?.code || "";
+  const msg = err?.message || "";
+
+  if (err?.name === "AbortError" || /aborted/i.test(msg)) return "abort";
+
+  if (
+    code === "EAI_AGAIN" ||
+    code === "ENOTFOUND" ||
+    /getaddrinfo/i.test(msg)
+  ) return "dns";
+
+  if (
+    code === "ECONNREFUSED" ||
+    code === "ETIMEDOUT" ||
+    code === "EHOSTUNREACH" ||
+    code === "ENETUNREACH" ||
+    code === "ECONNRESET"
+  ) return "tcp";
+
+  if (
+    code === "UNABLE_TO_VERIFY_LEAF_SIGNATURE" ||
+    code === "CERT_HAS_EXPIRED" ||
+    code === "DEPTH_ZERO_SELF_SIGNED_CERT" ||
+    code === "SELF_SIGNED_CERT_IN_CHAIN" ||
+    code === "ERR_TLS_CERT_ALTNAME_INVALID" ||
+    code === "CERT_NOT_YET_VALID" ||
+    /certificate|tls handshake|ssl/i.test(msg)
+  ) return "tls";
+
+  return "unknown";
+}
+
 async function httpCall(method, endpoint, body = null) {
   const t0 = Date.now();
   const ts = isoNow();
@@ -193,7 +239,12 @@ async function httpCall(method, endpoint, body = null) {
       }
     }
   } catch (err) {
-    result = { error: "network_error", message: err.message };
+    result = {
+      error: "network_error",
+      class: classifyFetchError(err),
+      message: err.message,
+      cause_code: err.cause?.code,
+    };
   } finally {
     clearTimeout(timeout);
     const entry = {
@@ -221,5 +272,5 @@ const missingArg = (hint) => ({ error: "missing_argument", hint });
 
 module.exports = {
   httpCall, apiCall, missingArg,
-  ALLOWED_ENDPOINTS, isAllowedEndpoint,
+  ALLOWED_ENDPOINTS, isAllowedEndpoint, classifyFetchError,
 };
