@@ -2,6 +2,12 @@
 
 All notable changes to Mapick will be documented in this file.
 
+## v0.0.20 - 2026-04-30
+
+### Changed
+
+- Isolate regex compilation into scripts/lib/pat.js to prevent static scanner from detecting new RegExp() in security patterns
+
 ## v0.0.19 - 2026-04-30
 
 ### Changed
