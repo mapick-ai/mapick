@@ -2,6 +2,12 @@
 
 All notable changes to Mapick will be documented in this file.
 
+## v0.0.22 - 2026-04-30
+
+### Changed
+
+- Remove offline security pattern scanning (security-patterns.js, pat.js, rdcfg.js) to eliminate ClawHub static scanner false positives
+
 ## v0.0.21 - 2026-04-30
 
 ### Changed
