@@ -73,7 +73,8 @@ async function handleBundle(args, ctx) {
       "bundle:recommend",
     );
   }
-  if (sub === "install" && args[1]) {
+  if (sub === "install") {
+    if (!args[1]) return missingArg("Usage: bundle install <bundleId>");
     const r = await apiCall(
       "GET",
       `/bundle/${args[1]}/install`,
@@ -277,22 +278,24 @@ function handleId(_args, ctx) {
 }
 
 function handleHelp() {
-  console.error(`Mapick — node shell.js <command> [args...]
+  return {
+    intent: "help",
+    text: `Mapick — node shell.js <command> [args...]
 
 Local:    init | status | scan | summary | id | first-run-done
 Diag:     diagnose | version
 Skills:   recommend [limit] | recommend:track <recId> <skillId> <action>
           search <query> [limit] | clean | clean:track <skillId>
           uninstall <skillId> [--confirm]
-Reports:  workflow | daily | weekly | report | share <reportId> <html> [locale]
+Reports:  workflow | daily | weekly | notify | report | share <reportId> <html> [locale]
 Bundles:  bundle [id] | bundle install <id> | bundle track-installed <id>
 Security: security <skillId> | security:report <skillId> <reason> <evidence>
 Privacy:  privacy {status|trust <id>|untrust <id>|delete-all --confirm
                  |consent-agree [ver]|consent-decline
                  |disable-redact|enable-redact|log [limit]}
 Events:   event:track <action> [skillId]   (always uses local device fp)
-Profile:  profile {set "<text>"|get|clear}`);
-  return { error: "usage" };
+Profile:  profile {set "<text>"|get|clear}`,
+  };
 }
 
 function handleUnknown(_args, ctx) {
