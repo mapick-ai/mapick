@@ -12,6 +12,7 @@
 # Options (via environment variables):
 #   MAPICK_VERSION=v0.0.9  ./install.sh   # Install specific version
 #   MAPICK_REPO=owner/repo ./install.sh   # Override source repo
+#   MAPICK_DISABLE_WORKSPACE_DUPLICATE=1  # Move shadowing workspace copy aside
 
 set -e
 
@@ -105,6 +106,37 @@ if ! [[ "${NODE_MAJOR}" =~ ^[0-9]+$ ]] \
 fi
 
 ok "Node.js detected: ${NODE_VER}"
+
+# -- Detect shadowing workspace Skill ------------------------------------------
+
+workspace_skill_dir="${HOME}/.openclaw/workspace/skills/mapick"
+if [[ -f "${workspace_skill_dir}/SKILL.md" ]] \
+   && grep -Eq '^name:[[:space:]]*mapick[[:space:]]*$' "${workspace_skill_dir}/SKILL.md"; then
+  echo ""
+  warn "Workspace Skill shadows managed Mapick:"
+  echo -e "    ${YELLOW}${workspace_skill_dir}${NC}"
+  echo ""
+  echo "OpenClaw loads workspace skills before managed skills, so this copy can"
+  echo "override the version installed to ~/.openclaw/skills/mapick."
+  echo ""
+
+  if [[ "${MAPICK_DISABLE_WORKSPACE_DUPLICATE:-0}" == "1" ]]; then
+    disabled_dir="${HOME}/.openclaw/workspace/mapick.disabled-$(date +%Y%m%d-%H%M%S)"
+    mv "${workspace_skill_dir}" "${disabled_dir}"
+    ok "Moved shadowing workspace copy to:"
+    echo -e "    ${DIM}${disabled_dir}${NC}"
+  else
+    echo "To use the newly installed version, move the workspace copy aside and"
+    echo "restart the gateway:"
+    echo ""
+    echo "    mv ~/.openclaw/workspace/skills/mapick ~/.openclaw/workspace/mapick.disabled-\$(date +%Y%m%d-%H%M%S)"
+    echo "    openclaw gateway restart"
+    echo ""
+    echo "Or rerun this installer with:"
+    echo ""
+    echo "    MAPICK_DISABLE_WORKSPACE_DUPLICATE=1 bash install.sh"
+  fi
+fi
 
 # -- Download tarball ----------------------------------------------------------
 

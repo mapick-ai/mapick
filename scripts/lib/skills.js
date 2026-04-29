@@ -56,17 +56,31 @@ function registerNotifyCron() {
   } catch {
     return { registered: false, reason: "openclaw_not_found" };
   }
+  const removed = [];
   try {
-    execSync("openclaw cron rm mapick-notify", { stdio: "ignore" });
+    const raw = execSync("openclaw cron list --json", {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+      timeout: 10000,
+    });
+    const parsed = JSON.parse(raw);
+    const jobs = Array.isArray(parsed?.jobs) ? parsed.jobs : [];
+    for (const job of jobs) {
+      if (job?.name !== "mapick-notify" || !job.id) continue;
+      try {
+        execSync(`openclaw cron rm ${job.id}`, { stdio: "ignore", timeout: 10000 });
+        removed.push(job.id);
+      } catch {}
+    }
   } catch {}
   try {
     execSync(
-      `openclaw cron add --name mapick-notify --cron "0 9 * * *" --session isolated --message "Run /mapick notify"`,
+      `openclaw cron add --name mapick-notify --cron "0 9 * * *" --session isolated --message "Run /mapick notify" --best-effort-deliver --timeout-seconds 120`,
       { stdio: "ignore", timeout: 10000 },
     );
-    return { registered: true };
+    return { registered: true, removed };
   } catch (err) {
-    return { registered: false, reason: err.message || "cron_add_failed" };
+    return { registered: false, removed, reason: err.message || "cron_add_failed" };
   }
 }
 

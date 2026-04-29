@@ -1,7 +1,7 @@
 ---
 name: mapick
 description: Mapick — Skill recommendation & privacy protection for OpenClaw. Scans your local skills, suggests what you're missing, and keeps other skills from seeing your sensitive data.
-metadata: { "openclaw": { "emoji": "🔍", "requires": { "bins": ["node", "curl"], "node": ">=22.14" }, "permissions": { "network": ["api.mapick.ai"], "file_read": ["~/.openclaw/skills/"], "file_write": ["~/.openclaw/skills/mapick/CONFIG.md", "~/.openclaw/skills/mapick/trash/", "~/.mapick/cache/"] } } }
+metadata: { "openclaw": { "emoji": "🔍", "requires": { "bins": ["node", "curl"], "node": ">=22.14" }, "permissions": { "network": ["api.mapick.ai"], "file_read": ["~/.openclaw/skills/","~/.openclaw/workspace/skills/"], "file_write": ["~/.openclaw/workspace/skills/mapick/CONFIG.md", "~/.openclaw/skills/mapick/trash/", "~/.mapick/cache/"] } } }
 ---
 
 # Mapick
@@ -14,6 +14,10 @@ Priority: **recommendation = privacy > persona > safety score > cleanup > everyt
 - Match every intent trigger in ANY language. Trigger lists are illustrative, not allow-lists.
 - Every `node scripts/shell.js <subcommand>` runs the Mapick Node entrypoint. Node.js (>=22.14) required.
 - Shell responses are single-line JSON. Parse it; never dump raw JSON to the user. Paraphrase errors.
+- For slash commands, never narrate internal preparation. Do not tell the user
+  you are reading SKILL.md, loading reference files, checking handlers, or
+  deciding which tool to call. Run the command and render only the final
+  user-facing result.
 
 Detailed rendering, multi-step flows, error templates, and lifecycle rules live in `reference/`. Load on demand.
 
@@ -78,7 +82,12 @@ Status + delete-all rendering: `reference/rendering.md#privacy:status`, `#privac
 
 ### Intent: report
 Triggers: analyze me, my persona, developer type, roast me.
-Command: `/mapick report` (alias `/mapick persona`)
+Command: `node scripts/shell.js report` (alias `/mapick persona`)
+
+Do not narrate tool selection, reference loading, or internal checks. Call the
+report command directly and render only the final card or final user-facing
+error. Never include phrases like "let me check", "according to SKILL.md", or
+raw tool reasoning.
 
 If `usageDays < 7` or `totalInvocations < 50` → render brewing card, do NOT generate HTML.
 Otherwise generate self-contained HTML per `prompts/persona-production.md`, save to `/tmp/mapick-report-{id}.html`, then `share <reportId> <htmlFile> <locale>`.
@@ -128,6 +137,14 @@ Lead with verdict (not dashboard). Surface one hidden insight. End with one spec
 Greet, mention scan + skillsCount, suggest `/mapick recommend`, include `privacy` line verbatim. No ASCII logo.
 
 Verdict templates + insight rules + first_install template: `reference/rendering.md#status`, `#first_install`.
+
+### Intent: diagnose
+Triggers: diagnose, version, loaded path, why old version, shadow, duplicate.
+Command: `node scripts/shell.js diagnose`
+
+Do not inspect unrelated directories or narrate investigation. Render only the
+JSON returned by `diagnose`: version, loaded directory, duplicate workspace
+skill, shadow risk, and fix hint. No preamble.
 
 ---
 
@@ -182,7 +199,8 @@ Impact-first template: `reference/rendering.md#clean`.
 Cron registered automatically on first `consent-agree` (and as safety net on every consented init):
 ```bash
 openclaw cron add --name mapick-notify --cron "0 9 * * *" \
-  --session isolated --message "Run /mapick notify"
+  --session isolated --message "Run /mapick notify" \
+  --best-effort-deliver --timeout-seconds 120
 ```
 
 On fire: `node scripts/shell.js notify` → `GET /notify/daily-check?currentVersion=<v>`.
@@ -226,11 +244,12 @@ User-facing:
 | `/mapick daily`          | Daily digest                                         |
 | `/mapick weekly`         | Weekly summary                                       |
 | `/mapick profile clear`  | Reset workflow profile + retrigger first-run summary |
+| `/mapick diagnose`       | Show loaded version/path and workspace shadow risks  |
 
 Internal (AI invokes; users don't type):
 `clean:track <skillId>` · `bundle:track-installed <id>` · `summary` · `profile set/get` · `first-run-done` · `recommend --with-profile` · `recommend:track <recId> <skillId> installed` · `security:report` · `notify` · `share <reportId> <htmlFile> [locale]`
 
-Debug: `node scripts/shell.js id`.
+Debug: `node scripts/shell.js id`, `node scripts/shell.js diagnose`.
 
 ---
 

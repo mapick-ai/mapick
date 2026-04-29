@@ -54,6 +54,13 @@ async function handleNotify() {
   const resp = await httpCall("GET", `/notify/daily-check?${params}`);
   // Silence-first: backend/network failure → empty alerts.
   if (resp.error) return { intent: "notify", alerts: [] };
+  if (Array.isArray(resp.alerts) && installedVer) {
+    const baseVersion = installedVer.split("-")[0];
+    resp.alerts = resp.alerts.filter((alert) => {
+      if (alert?.type !== "version") return true;
+      return !(alert.latest && baseVersion === String(alert.latest).split("-")[0]);
+    });
+  }
   return { intent: "notify", ...resp };
 }
 
@@ -201,6 +208,41 @@ function handleFirstRunDone() {
   return { intent: "first-run-done", done: true };
 }
 
+function handleDiagnose() {
+  const versionFile = path.join(CONFIG_DIR, ".version");
+  let version = null;
+  try {
+    version = fs.readFileSync(versionFile, "utf8").trim();
+  } catch {}
+
+  const home = process.env.HOME || "";
+  const workspaceDuplicate = path.join(
+    home,
+    ".openclaw",
+    "workspace",
+    "skills",
+    "mapick",
+  );
+  const duplicateExists = fs.existsSync(path.join(workspaceDuplicate, "SKILL.md"));
+  const skillFile = path.join(CONFIG_DIR, "SKILL.md");
+  let skillMtime = null;
+  try {
+    skillMtime = fs.statSync(skillFile).mtime.toISOString();
+  } catch {}
+
+  return {
+    intent: "diagnose",
+    version,
+    loaded_dir: CONFIG_DIR,
+    skill_mtime: skillMtime,
+    duplicate_workspace_skill: duplicateExists ? workspaceDuplicate : null,
+    shadow_risk: duplicateExists,
+    fix_hint: duplicateExists
+      ? "Move the workspace copy outside ~/.openclaw/workspace/skills and restart the OpenClaw gateway."
+      : null,
+  };
+}
+
 function handleId(_args, ctx) {
   return { intent: "id", debug_identifier: ctx.fp };
 }
@@ -209,6 +251,7 @@ function handleHelp() {
   console.error(`Mapick — node shell.js <command> [args...]
 
 Local:    init | status | scan | summary | id | first-run-done
+Diag:     diagnose | version
 Skills:   recommend [limit] | recommend:track <recId> <skillId> <action>
           search <query> [limit] | clean | clean:track <skillId>
           uninstall <skillId> [--confirm]
@@ -234,5 +277,5 @@ function handleUnknown(_args, ctx) {
 module.exports = {
   handleWorkflow, handleDaily, handleWeekly, handleNotify,
   handleBundle, handleReport, handleShare, handleEvent,
-  handleProfile, handleFirstRunDone, handleId, handleHelp, handleUnknown,
+  handleProfile, handleFirstRunDone, handleDiagnose, handleId, handleHelp, handleUnknown,
 };

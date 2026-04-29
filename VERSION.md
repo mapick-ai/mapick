@@ -2,6 +2,18 @@
 
 All notable changes to Mapick will be documented in this file.
 
+## Unreleased
+
+### Fixed
+
+- Installer now warns when a workspace Mapick skill shadows the managed install.
+- Privacy status now renders the opt-out default as `remote_access: enabled`.
+- Persona report instructions now forbid leaking tool selection or internal checks.
+
+### Added
+
+- `diagnose` / `version` shell command for loaded path, version, and shadow-risk checks.
+
 ## v0.0.9 - 2026-04-29
 
 ### Changed
