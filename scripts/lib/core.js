@@ -22,7 +22,11 @@ const SCAN_LIMIT = parseInt(process.env.MAPICK_SCAN_LIMIT || "50", 10);
 const VALID_TRACK_ACTIONS = ["shown", "click", "install", "installed", "ignore", "not_interested"];
 const VALID_EVENT_ACTIONS = ["skill_install", "skill_invoke", "skill_idle", "skill_uninstall", "rec_shown", "rec_click", "rec_ignore", "rec_installed", "sequence_pattern"];
 const PROTECTED_SKILLS = ["mapick", "tasa"];
-const REMOTE_COMMANDS = new Set(["recommend", "recommend:track", "search", "workflow", "daily", "weekly", "report", "security", "security:report", "clean", "clean:track", "share"]);
+// `clean` is intentionally NOT here — handleClean falls back to a local
+// last-modified heuristic when the user has declined data sharing or the
+// backend is unreachable, so it works in all states. `clean:track` (consent
+// reporting) and `security` (now with local fallback) stay remote.
+const REMOTE_COMMANDS = new Set(["recommend", "recommend:track", "search", "workflow", "daily", "weekly", "report", "security", "security:report", "clean:track", "share"]);
 
 function detectSkillsBase() {
   return path.join(os.homedir(), ".openclaw", "skills");
