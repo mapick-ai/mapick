@@ -2,6 +2,12 @@
 
 All notable changes to Mapick will be documented in this file.
 
+## v0.0.14 - 2026-04-29
+
+### Changed
+
+- Split audit-log reader out of http.js to clear ClawHub potential_exfiltration scanner warning
+
 ## v0.0.13 - 2026-04-29
 
 ### Changed
