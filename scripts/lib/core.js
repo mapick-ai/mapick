@@ -24,9 +24,8 @@ const VALID_EVENT_ACTIONS = ["skill_install", "skill_invoke", "skill_idle", "ski
 const PROTECTED_SKILLS = ["mapick", "tasa"];
 // `clean` is intentionally NOT here — handleClean falls back to a local
 // last-modified heuristic when the user has declined data sharing or the
-// backend is unreachable, so it works in all states. `clean:track` (consent
-// reporting) and `security` (now with local fallback) stay remote.
-const REMOTE_COMMANDS = new Set(["recommend", "recommend:track", "search", "workflow", "daily", "weekly", "report", "security", "security:report", "clean:track", "share"]);
+// backend is unreachable, so it works in all states.
+const REMOTE_COMMANDS = new Set(["recommend", "recommend:track", "search", "workflow", "daily", "weekly", "notify", "report", "security", "security:report", "clean:track", "share"]);
 
 function detectSkillsBase() {
   return path.join(os.homedir(), ".openclaw", "skills");

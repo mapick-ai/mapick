@@ -34,7 +34,7 @@ const updates = require("./lib/updates");
 
 const HANDLERS = {
   init: skills.handleInit,
-  status: skills.handleInit,
+  status: skills.handleStatus,
   scan: skills.handleScan,
   summary: skills.handleSummary,
 
