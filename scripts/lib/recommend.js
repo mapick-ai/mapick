@@ -79,7 +79,7 @@ async function handleSearch(args) {
     total: items.length,
     query,
     ...(items.length < 5
-      ? { notice: "Few local matches. Try ClawHub for more results." }
+      ? { notice: "Few matches. Try a broader keyword or another category." }
       : {}),
   };
 }
