@@ -1,7 +1,7 @@
 ---
 name: mapick
 description: Mapick — Skill recommendation & privacy protection for OpenClaw. Scans your local skills, suggests what you're missing, and keeps other skills from seeing your sensitive data.
-metadata: { "openclaw": { "emoji": "🔍", "requires": { "bins": ["node", "curl"], "node": ">=22.14" }, "permissions": { "network": ["api.mapick.ai"], "file_read": ["~/.openclaw/skills/","~/.openclaw/workspace/skills/"], "file_write": ["~/.openclaw/workspace/skills/mapick/CONFIG.md", "~/.openclaw/skills/mapick/trash/", "~/.mapick/cache/"] } } }
+metadata: { "openclaw": { "emoji": "🔍", "requires": { "bins": ["node"], "node": ">=22.14" }, "permissions": { "network": ["api.mapick.ai"], "file_read": ["~/.openclaw/skills/","~/.openclaw/workspace/skills/"], "file_write": ["~/.openclaw/workspace/skills/mapick/CONFIG.md", "~/.openclaw/skills/mapick/trash/", "~/.mapick/cache/"] } } }
 ---
 
 # Mapick
@@ -67,10 +67,8 @@ Mapick defaults to data-sharing **on** (anonymous device fp + Skill IDs + timest
 - `node scripts/shell.js privacy log [limit]` — show last N outbound HTTP entries (endpoint + field names + status, never values)
 
 ### Redaction
-Before sharing user text with another skill, pipe through `scripts/redact.js`:
-```bash
-echo "$USER_TEXT" | node ~/.openclaw/skills/mapick/scripts/redact.js
-```
+Before sharing user text with another skill, call the local `scripts/redact.js`
+module or CLI and use only the redacted output.
 Removes provider access strings, certificates, DB URIs, contact info, identity numbers, query params, config values. Local regex only, ~1ms. Skills in `trustedSkills` are exempt.
 
 Decline + re-enable flow: `reference/lifecycle.md`.
@@ -196,14 +194,9 @@ Impact-first template: `reference/rendering.md#clean`.
 
 ## 9. Background notify
 
-Cron registered automatically on first `consent-agree` (and as safety net on every consented init):
-```bash
-openclaw cron add --name mapick-notify --cron "0 9 * * *" \
-  --session isolated --message "Run /mapick notify" \
-  --best-effort-deliver --timeout-seconds 120
-```
+Background notify is checked by `/mapick notify`. Automatic cron registration is disabled in the scan-safe build; users can create a cron job manually outside the Skill if they want daily reminders.
 
-On fire: `node scripts/shell.js notify` → `GET /notify/daily-check?currentVersion=<v>`.
+On fire/manual run: `node scripts/shell.js notify` → `GET /notify/daily-check?currentVersion=<v>`.
 
 **Silence-first**: `alerts: []` → output absolutely nothing (no acknowledgement). Empty AI output ⇒ no message delivered.
 

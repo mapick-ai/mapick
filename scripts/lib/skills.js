@@ -2,7 +2,6 @@
 
 const fs = require("fs");
 const path = require("path");
-const { execFileSync } = require("child_process");
 const {
   CONFIG_DIR, REDACTJS_PATH, SCRIPTS_DIR, SKILLS_BASE,
   isoNow, parseFrontmatter,
@@ -48,64 +47,8 @@ function countRedactRules() {
   return 0;
 }
 
-function resolveOpenClawBin() {
-  const candidates = [
-    process.env.OPENCLAW_BIN,
-    path.join(path.dirname(process.execPath), "openclaw"),
-    path.join(process.env.HOME || "", ".nvm", "versions", "node", "v24.15.0", "bin", "openclaw"),
-    "openclaw",
-  ].filter(Boolean);
-  for (const candidate of candidates) {
-    try {
-      execFileSync(candidate, ["--version"], { stdio: "ignore", timeout: 10000 });
-      return candidate;
-    } catch {}
-  }
-  return null;
-}
-
-// Idempotent (cron rm + cron add). `--session isolated` is required:
-// OpenClaw rejects `--session main` without `--system-event`.
 function registerNotifyCron() {
-  const openclawBin = resolveOpenClawBin();
-  if (!openclawBin) {
-    return { registered: false, reason: "openclaw_not_found" };
-  }
-  const removed = [];
-  try {
-    const raw = execFileSync(openclawBin, ["cron", "list", "--json"], {
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
-      timeout: 10000,
-    });
-    const parsed = JSON.parse(raw);
-    const jobs = Array.isArray(parsed?.jobs) ? parsed.jobs : [];
-    for (const job of jobs) {
-      if (job?.name !== "mapick-notify" || !job.id) continue;
-      try {
-        execFileSync(openclawBin, ["cron", "rm", String(job.id)], { stdio: "ignore", timeout: 10000 });
-        removed.push(job.id);
-      } catch {}
-    }
-  } catch {}
-  try {
-    execFileSync(
-      openclawBin,
-      [
-        "cron", "add",
-        "--name", "mapick-notify",
-        "--cron", "0 9 * * *",
-        "--session", "isolated",
-        "--message", "Run /mapick notify",
-        "--best-effort-deliver",
-        "--timeout-seconds", "120",
-      ],
-      { stdio: "ignore", timeout: 10000 },
-    );
-    return { registered: true, removed };
-  } catch (err) {
-    return { registered: false, removed, reason: err.message || "cron_add_failed" };
-  }
+  return { registered: false, reason: "cron_registration_disabled_in_scan_safe_build" };
 }
 
 async function aggregateSummary(skills, config) {

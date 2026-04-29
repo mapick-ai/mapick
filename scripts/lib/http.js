@@ -1,7 +1,7 @@
 const fs = require("fs");
 const path = require("path");
 const os = require("os");
-const { API_BASE, deviceFp, redact, isoNow } = require("./core");
+const { API_BASE, deviceFp, redactForUpload, isoNow } = require("./core");
 
 /**
  * Mapick outbound network manifest. EVERY HTTP request from this Skill
@@ -24,7 +24,7 @@ const { API_BASE, deviceFp, redact, isoNow } = require("./core");
  * POST /users/trusted-skills          userId, skillId, permission     /mapick privacy trust
  * DELETE /users/data                  device_fp                       /mapick privacy delete-all
  * POST /users/consent                 consentVersion, agreedAt        first install consent
- * POST /users/:fp/profile-text        profileText, profileTags        /mapick profile set
+ * POST /users/:fp/profile-text        redacted profileText, tags      /mapick profile set
  * GET  /notify/daily-check            currentVersion, repo            daily cron
  *
  * Base URL: https://api.mapick.ai/api/v1 (also declared in SKILL.md
@@ -39,17 +39,14 @@ const { API_BASE, deviceFp, redact, isoNow } = require("./core");
  * Trust signals:
  *  - Endpoint allowlist (ALLOWED_ENDPOINTS below) — calls outside the
  *    manifest are refused before they leave the box.
- *  - redact() pre-flight — every body is checked for sensitive patterns;
- *    mismatch is recorded as redact_warning in the outbound log (the
- *    original payload is still sent so API contracts don't silently
- *    break, but the user gets a signal to investigate).
+ *  - redact() pre-flight — every body is checked for sensitive patterns.
+ *    Redaction unavailable => refused. Sensitive-looking values => only
+ *    the redacted JSON body is sent and redacted_payload is logged.
  *  - Outbound log at ~/.mapick/logs/outbound.jsonl — endpoint, method,
  *    field NAMES (never values), status code, duration. /mapick privacy
  *    log shows the last 10 entries.
  *
- * Why curl, not https.request: Node 24 on macOS throws
- * UNABLE_TO_VERIFY_LEAF_SIGNATURE because bundled CAs miss intermediates
- * the system keychain trusts; `--use-system-ca` is unreliable in 24.x.
+ * Uses Node's built-in fetch with a 15s AbortController timeout.
  */
 
 // Endpoint allowlist — paths not matching any pattern are refused.
@@ -143,101 +140,92 @@ async function httpCall(method, endpoint, body = null) {
   const url = new URL(endpoint.replace(/^\//, ""), base);
   const STATUS_DELIM = "___MAPICK_HTTP_STATUS___";
 
-  // Audit-mode redact: never rewrite the payload (would silently break
-  // API contracts). Just flag if redact would change anything so the
-  // user sees redact_warning in the outbound log.
-  let redactWarning = false;
+  // Fail closed when redaction is unavailable. If sensitive-looking values
+  // are present, send only the redacted JSON body and record that fact.
+  let bodyToSend = body;
+  let redactedPayload = false;
   if (body) {
     const original = JSON.stringify(body);
-    if (redact(original) !== original) redactWarning = true;
-  }
-
-  const args = [
-    "-sSL",
-    "-X", method,
-    "-m", "15",
-    "-H", "Content-Type: application/json",
-    "-H", `x-device-fp: ${deviceFp()}`,
-    "-w", `\n${STATUS_DELIM}%{http_code}`,
-    url.toString(),
-  ];
-  if (body) {
-    args.push("-d", JSON.stringify(body));
+    const redacted = redactForUpload(original);
+    if (!redacted.ok) {
+      logOutbound({
+        ts,
+        method,
+        endpoint: endpoint.split("?")[0],
+        blocked: true,
+        reason: redacted.error,
+      });
+      return { error: redacted.error, message: redacted.message };
+    }
+    if (redacted.text !== original) {
+      redactedPayload = true;
+      try {
+        bodyToSend = JSON.parse(redacted.text);
+      } catch {
+        logOutbound({
+          ts,
+          method,
+          endpoint: endpoint.split("?")[0],
+          blocked: true,
+          reason: "redaction_parse_failed",
+        });
+        return { error: "redaction_parse_failed" };
+      }
+    }
   }
 
   const params = [...url.searchParams.keys()];
   const bodyFields = body && typeof body === "object" ? Object.keys(body) : [];
 
-  return new Promise((resolve) => {
-    const cp = require("child_process").execFile(
-      "curl",
-      args,
-      { maxBuffer: 8 * 1024 * 1024 },
-      (err, stdout) => {
-        let result;
-        if (err && !stdout) {
-          result = { error: "network_error", message: err.message };
-          finish(0);
-          return;
-        }
-        const idx = stdout.lastIndexOf(STATUS_DELIM);
-        const data = idx >= 0 ? stdout.slice(0, idx).replace(/\n$/, "") : stdout;
-        const code = idx >= 0 ? parseInt(stdout.slice(idx + STATUS_DELIM.length).trim(), 10) : 0;
-
-        if (!code || Number.isNaN(code)) {
-          result = {
-            error: "network_error",
-            message: err ? err.message : "no_status_code",
-          };
-        } else if (code >= 400) {
-          // Pass backend body through for ALL 4xx/5xx, including 401/404/429.
-          // Fixed shapes for those three used to drop the backend's `message`
-          // / `hint` / `retryAfterSec`, leaving the AI without anything to
-          // tell the user.
-          const stableErrors = { 401: "unauthorized", 404: "not_found", 429: "rate_limit" };
-          const errCode = stableErrors[code] || "http_error";
-          try {
-            const parsed = JSON.parse(data);
-            result = { error: errCode, statusCode: code, ...parsed };
-          } catch {
-            result = { error: errCode, statusCode: code, body: data };
-          }
-        } else {
-          try {
-            result = JSON.parse(data);
-          } catch {
-            result = { error: "parse_error", raw: data };
-          }
-        }
-        finish(code);
-
-        function finish(status) {
-          const entry = {
-            ts,
-            method,
-            endpoint: endpoint.split("?")[0],
-            params,
-            body_fields: bodyFields,
-            status,
-            duration_ms: Date.now() - t0,
-          };
-          if (redactWarning) entry.redact_warning = true;
-          logOutbound(entry);
-          resolve(result);
-        }
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 15000);
+  let status = 0;
+  let result;
+  try {
+    const response = await fetch(url, {
+      method,
+      headers: {
+        "Content-Type": "application/json",
+        "x-device-fp": deviceFp(),
       },
-    );
-    cp.on("error", (e) => {
-      logOutbound({
-        ts,
-        method,
-        endpoint: endpoint.split("?")[0],
-        error: "spawn_failed",
-        duration_ms: Date.now() - t0,
-      });
-      resolve({ error: "network_error", message: e.message });
+      body: bodyToSend ? JSON.stringify(bodyToSend) : undefined,
+      signal: controller.signal,
     });
-  });
+    status = response.status;
+    const data = await response.text();
+    if (status >= 400) {
+      const stableErrors = { 401: "unauthorized", 404: "not_found", 429: "rate_limit" };
+      const errCode = stableErrors[status] || "http_error";
+      try {
+        const parsed = JSON.parse(data);
+        result = { error: errCode, statusCode: status, ...parsed };
+      } catch {
+        result = { error: errCode, statusCode: status, body: data };
+      }
+    } else {
+      try {
+        result = JSON.parse(data);
+      } catch {
+        result = { error: "parse_error", raw: data };
+      }
+    }
+  } catch (err) {
+    result = { error: "network_error", message: err.message };
+  } finally {
+    clearTimeout(timeout);
+    const entry = {
+      ts,
+      method,
+      endpoint: endpoint.split("?")[0],
+      params,
+      body_fields: bodyFields,
+      status,
+      duration_ms: Date.now() - t0,
+    };
+    if (redactedPayload) entry.redacted_payload = true;
+    logOutbound(entry);
+  }
+  return result;
 }
 
 async function apiCall(method, endpoint, body, intent) {
