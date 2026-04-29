@@ -2,6 +2,12 @@
 
 All notable changes to Mapick will be documented in this file.
 
+## v0.0.16 - 2026-04-30
+
+### Changed
+
+- status command fix (#53), notify:plan delivery warning (#54/#55), p0/p1/p2 skill upgrade merges (http.js native requests, query param redaction, redact RULE_COUNT export, misc/privacy/recommend/clean optimizations), TLS intermediate cert reverted
+
 ## Unreleased
 
 ### Added
