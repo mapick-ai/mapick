@@ -84,18 +84,12 @@ function scanAllSkills() {
   return out;
 }
 
-// Counts `[/` at line start — one per RULES tuple. Auto-follows redact.js changes.
 function countRedactRules() {
-  const candidates = [REDACTJS_PATH, path.join(SCRIPTS_DIR, "redact.js")];
-  for (const file of candidates) {
-    if (!fs.existsSync(file)) continue;
-    try {
-      const content = fs.readFileSync(file, "utf8");
-      const matches = content.match(/^\s*\[\//gm);
-      if (matches && matches.length > 0) return matches.length;
-    } catch {}
+  try {
+    return require("../redact").RULE_COUNT || 0;
+  } catch {
+    return 0;
   }
-  return 0;
 }
 
 function registerNotifyCron() {
@@ -197,7 +191,9 @@ async function handleInit(_args, ctx) {
     activation_rate:
       total > 0 ? `${Math.round((active / total) * 100)}%` : "0%",
     zombie_count: zombies.length,
-    never_used: skills.filter((s) => !s.last_modified).length,
+    never_used: skills.filter(
+      (s) => s.installed_at && s.last_modified === s.installed_at,
+    ).length,
   };
 }
 
