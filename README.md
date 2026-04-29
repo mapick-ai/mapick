@@ -154,7 +154,7 @@ The code is open source. You can read every rule, verify every pattern, and add 
 Decline all data sharing at any time:
 
 ```
-/mapick privacy consent-decline      → local-only mode (cleanup + security still work)
+/mapick privacy consent-decline      → local-only mode (status/scan/clean/uninstall/privacy keep working; remote recommendations/search/security/reports/bundles/share are refused)
 /mapick privacy delete-all --confirm → GDPR Article 17: delete everything
 ```
 

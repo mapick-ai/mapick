@@ -1,6 +1,8 @@
 const fs = require("fs");
 const path = require("path");
 const os = require("os");
+const https = require("https");
+const tls = require("tls");
 const { API_BASE, deviceFp, redactForUpload, isoNow } = require("./core");
 
 /**
@@ -80,6 +82,18 @@ const LOG_DIR = path.join(os.homedir(), ".mapick", "logs");
 const LOG_FILE = path.join(LOG_DIR, "outbound.jsonl");
 const LOG_FILE_BAK = path.join(LOG_DIR, "outbound.jsonl.1");
 const LOG_MAX_BYTES = 1024 * 1024;
+const EXTRA_CA_FILE = path.join(__dirname, "..", "certs", "ZeroSSLECCDVSSLCA2.pem");
+
+function buildHttpsAgent() {
+  try {
+    const extraCa = fs.readFileSync(EXTRA_CA_FILE, "utf8");
+    return new https.Agent({ ca: [...tls.rootCertificates, extraCa] });
+  } catch {
+    return new https.Agent();
+  }
+}
+
+const HTTPS_AGENT = buildHttpsAgent();
 
 // Append one JSONL entry to the outbound audit log. Never throws — a
 // broken log path must not break the actual API call.
@@ -121,12 +135,31 @@ async function httpCall(method, endpoint, body = null) {
 
   const base = API_BASE.replace(/\/$/, "") + "/";
   const url = new URL(endpoint.replace(/^\//, ""), base);
-  const STATUS_DELIM = "___MAPICK_HTTP_STATUS___";
+
+  let redactedPayload = false;
+  for (const [key, value] of url.searchParams.entries()) {
+    if (!value) continue;
+    const redacted = redactForUpload(value);
+    if (!redacted.ok) {
+      logOutbound({
+        ts,
+        method,
+        endpoint: endpoint.split("?")[0],
+        blocked: true,
+        reason: redacted.error,
+        params: [...url.searchParams.keys()],
+      });
+      return { error: redacted.error, message: redacted.message };
+    }
+    if (redacted.text !== value) {
+      redactedPayload = true;
+      url.searchParams.set(key, redacted.text);
+    }
+  }
 
   // Fail closed when redaction is unavailable. If sensitive-looking values
   // are present, send only the redacted JSON body and record that fact.
   let bodyToSend = body;
-  let redactedPayload = false;
   if (body) {
     const original = JSON.stringify(body);
     const redacted = redactForUpload(original);
@@ -160,22 +193,12 @@ async function httpCall(method, endpoint, body = null) {
   const params = [...url.searchParams.keys()];
   const bodyFields = body && typeof body === "object" ? Object.keys(body) : [];
 
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 15000);
   let status = 0;
   let result;
   try {
-    const response = await fetch(url, {
-      method,
-      headers: {
-        "Content-Type": "application/json",
-        "x-device-fp": deviceFp(),
-      },
-      body: bodyToSend ? JSON.stringify(bodyToSend) : undefined,
-      signal: controller.signal,
-    });
+    const response = await requestJson(url, method, bodyToSend);
     status = response.status;
-    const data = await response.text();
+    const data = response.body;
     if (status >= 400) {
       const stableErrors = { 401: "unauthorized", 404: "not_found", 429: "rate_limit" };
       const errCode = stableErrors[status] || "http_error";
@@ -195,7 +218,6 @@ async function httpCall(method, endpoint, body = null) {
   } catch (err) {
     result = { error: "network_error", message: err.message };
   } finally {
-    clearTimeout(timeout);
     const entry = {
       ts,
       method,
@@ -209,6 +231,37 @@ async function httpCall(method, endpoint, body = null) {
     logOutbound(entry);
   }
   return result;
+}
+
+function requestJson(url, method, body) {
+  return new Promise((resolve, reject) => {
+    const payload = body ? JSON.stringify(body) : null;
+    const req = https.request(url, {
+      method,
+      agent: HTTPS_AGENT,
+      headers: {
+        "Content-Type": "application/json",
+        "x-device-fp": deviceFp(),
+        ...(payload ? { "Content-Length": Buffer.byteLength(payload) } : {}),
+      },
+      timeout: 15000,
+    }, (res) => {
+      let data = "";
+      res.setEncoding("utf8");
+      res.on("data", (chunk) => {
+        data += chunk;
+      });
+      res.on("end", () => {
+        resolve({ status: res.statusCode || 0, body: data });
+      });
+    });
+    req.on("timeout", () => {
+      req.destroy(new Error("request_timeout"));
+    });
+    req.on("error", reject);
+    if (payload) req.write(payload);
+    req.end();
+  });
 }
 
 async function apiCall(method, endpoint, body, intent) {
