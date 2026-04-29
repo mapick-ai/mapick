@@ -3,11 +3,45 @@
 const fs = require("fs");
 const path = require("path");
 const {
-  OUT_ARR, SKILLS_BASE, TRASH_DIR,
+  OUT_ARR, SKILLS_BASE, WORKSPACE_SKILLS_BASE, TRASH_DIR,
   isoNow, isProtected, isConsentDeclined,
 } = require("./core");
 const { httpCall, apiCall, missingArg } = require("./http");
-const { scanSkills } = require("./skills");
+const { scanSkills, scanAllSkills } = require("./skills");
+
+// Resolve `<skillId>` (+ optional `--source=managed|workspace`) to a single
+// install path. Returns `{ ok: true, path, source }` or `{ ok: false, error,
+// ... }` if the id is missing or ambiguous between bases.
+function resolveSkillTarget(targetId, args) {
+  const sourceArg = (args.find((a) => a.startsWith("--source=")) || "").split("=")[1];
+  const candidates = scanAllSkills().filter((s) => s.id === targetId);
+  if (candidates.length === 0) {
+    return { ok: false, error: "not_found", skillId: targetId };
+  }
+  if (sourceArg) {
+    const picked = candidates.find((c) => c.source === sourceArg);
+    if (!picked) {
+      return {
+        ok: false,
+        error: "not_found",
+        skillId: targetId,
+        source: sourceArg,
+        hint: `No ${sourceArg} install of ${targetId}.`,
+      };
+    }
+    return { ok: true, path: picked.path, source: picked.source };
+  }
+  if (candidates.length > 1) {
+    return {
+      ok: false,
+      error: "ambiguous_source",
+      skillId: targetId,
+      sources: candidates.map((c) => c.source),
+      hint: "Add --source=managed or --source=workspace to disambiguate.",
+    };
+  }
+  return { ok: true, path: candidates[0].path, source: candidates[0].source };
+}
 
 function backupSkill(skillPath) {
   const linkStat = fs.lstatSync(skillPath);
@@ -48,9 +82,14 @@ function backupSkill(skillPath) {
 // declined users and when the backend is offline.
 function localZombies() {
   const zombieDays = parseInt(process.env.MAPICK_ZOMBIE_DAYS || "30", 10);
+  const includeWorkspace = process.env.MAPICK_ZOMBIE_INCLUDE_WORKSPACE === "1";
   const cutoff = Date.now() - zombieDays * 86_400_000;
   return scanSkills()
     .filter((s) => !isProtected(s.id))
+    // Workspace is where users iterate WIP skills — calling them "zombies"
+    // and prompting cleanup would surprise the user. Exclude unless the
+    // operator explicitly asks (`MAPICK_ZOMBIE_INCLUDE_WORKSPACE=1`).
+    .filter((s) => includeWorkspace || s.source !== "workspace")
     .filter((s) => new Date(s.last_modified).getTime() < cutoff)
     .slice(0, OUT_ARR)
     .map((s) => ({
@@ -59,6 +98,7 @@ function localZombies() {
       lastUsedAt: s.last_modified,
       installedAt: s.installed_at,
       reason: "idle_30d",
+      source: s.source,
     }));
 }
 
@@ -111,7 +151,9 @@ async function handleTrack(args, ctx) {
 }
 
 function handleUninstall(args) {
-  if (args.length < 1) return missingArg("Usage: uninstall <skillId> [--confirm]");
+  if (args.length < 1) {
+    return missingArg("Usage: uninstall <skillId> [--confirm] [--source=managed|workspace]");
+  }
   const targetId = args[0];
   if (!args.includes("--confirm")) {
     return { error: "confirm_required", hint: "Add --confirm to execute" };
@@ -119,10 +161,9 @@ function handleUninstall(args) {
   if (isProtected(targetId)) {
     return { error: "protected_skill", skillId: targetId };
   }
-  const skillDir = path.join(SKILLS_BASE, targetId);
-  if (!fs.existsSync(skillDir)) {
-    return { error: "not_found", skillId: targetId };
-  }
+  const resolved = resolveSkillTarget(targetId, args);
+  if (!resolved.ok) return resolved;
+  const skillDir = resolved.path;
   let backup;
   try {
     backup = backupSkill(skillDir);
@@ -130,6 +171,7 @@ function handleUninstall(args) {
     return {
       error: err.code || "backup_failed",
       skillId: targetId,
+      source: resolved.source,
       hint:
         err.code === "symlink_skill"
           ? "Refusing to uninstall a symlinked skill. Remove the link manually if intentional."
@@ -140,27 +182,29 @@ function handleUninstall(args) {
   return {
     intent: "uninstall",
     skillId: targetId,
+    source: resolved.source,
     backup_path: backup,
     uninstalled_at: isoNow(),
   };
 }
 
-// `backup:create <id>` — copy ~/.openclaw/skills/<id> into trash/ for restore.
+// `backup:create <id>` — copy the install dir into trash/ for restore.
 // Used as Mapick-side step 1 of upgrade:plan so an upgrade can be rolled back.
 function handleBackupCreate(args) {
-  if (args.length < 1) return missingArg("Usage: backup:create <skillId>");
-  const id = args[0];
-  const skillDir = path.join(SKILLS_BASE, id);
-  if (!fs.existsSync(skillDir)) {
-    return { error: "not_found", skillId: id };
+  if (args.length < 1) {
+    return missingArg("Usage: backup:create <skillId> [--source=managed|workspace]");
   }
+  const id = args[0];
+  const resolved = resolveSkillTarget(id, args);
+  if (!resolved.ok) return resolved;
   let backup;
   try {
-    backup = backupSkill(skillDir);
+    backup = backupSkill(resolved.path);
   } catch (err) {
     return {
       error: err.code || "backup_failed",
       skillId: id,
+      source: resolved.source,
       hint:
         err.code === "symlink_skill"
           ? "Refusing to back up a symlinked skill. Back up the real directory manually if intentional."
@@ -170,12 +214,15 @@ function handleBackupCreate(args) {
   return {
     intent: "backup:create",
     skillId: id,
+    source: resolved.source,
     backup_path: backup,
     backed_up_at: isoNow(),
   };
 }
 
-// `backup:restore <id>` — pull the most recent backup of <id> back from trash/.
+// `backup:restore <id>` — pull the most recent backup of <id> back into the
+// matching base. If the skill currently exists in workspace, restore there;
+// otherwise restore to managed.
 function handleBackupRestore(args) {
   if (args.length < 1) return missingArg("Usage: backup:restore <skillId>");
   const id = args[0];
@@ -195,12 +242,25 @@ function handleBackupRestore(args) {
     return { error: "no_backup_found", skillId: id };
   }
   const latest = matches[0];
-  const skillDir = path.join(SKILLS_BASE, id);
+  // Pick base by current presence; default to managed if absent from both.
+  const wsPath = path.join(WORKSPACE_SKILLS_BASE, id);
+  const managedPath = path.join(SKILLS_BASE, id);
+  let skillDir = managedPath;
+  let source = "managed";
+  if (fs.existsSync(wsPath)) {
+    skillDir = wsPath;
+    source = "workspace";
+  } else if (!fs.existsSync(managedPath)) {
+    // Neither present; default to managed (where new installs land).
+    skillDir = managedPath;
+    source = "managed";
+  }
   fs.rmSync(skillDir, { recursive: true, force: true });
   fs.cpSync(latest.path, skillDir, { recursive: true });
   return {
     intent: "backup:restore",
     skillId: id,
+    source,
     restored_from: latest.path,
     restored_at: isoNow(),
   };
