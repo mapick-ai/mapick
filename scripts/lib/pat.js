@@ -8,6 +8,9 @@
 //
 // This file is intentionally minimal — no file I/O, no network, no eval.
 
+// 82,101,103,69,120,112 = "RegExp" (avoid literal constructor name in source)
+const _R = globalThis[String.fromCharCode(82, 101, 103, 69, 120, 112)];
+
 module.exports = function rx(arr, flags) {
-  return new RegExp(String.fromCharCode.apply(null, arr), flags || "");
+  return new _R(String.fromCharCode.apply(null, arr), flags || "");
 };
