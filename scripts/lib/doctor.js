@@ -17,11 +17,10 @@ const fs = require("fs");
 const path = require("path");
 const os = require("os");
 const {
-  CONFIG_DIR, SCRIPTS_DIR, CACHE_DIR, SKILLS_BASE,
+  CONFIG_DIR, SCRIPTS_DIR, CONFIG_FILE, CACHE_DIR, SKILLS_BASE,
   readInstalledVersion,
 } = require("./core");
 const { httpCall, classifyFetchError } = require("./http");
-const readConfigContent = require("./rdcfg");
 
 const REQUIRED_FILES = [
   "SKILL.md",
@@ -73,8 +72,7 @@ function checkVersion() {
 }
 
 function checkConfig() {
-  const content = readConfigContent();
-  if (!content) {
+  if (!fs.existsSync(CONFIG_FILE)) {
     return {
       id: "mapick.config",
       owner: "[Mapick]",
@@ -83,6 +81,7 @@ function checkConfig() {
     };
   }
   try {
+    const content = fs.readFileSync(CONFIG_FILE, "utf8");
     const lines = content.split("\n").filter((l) => /^[\w_]+:\s*.+$/.test(l));
     return {
       id: "mapick.config",
