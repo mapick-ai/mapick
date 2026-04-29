@@ -2,6 +2,12 @@
 
 All notable changes to Mapick will be documented in this file.
 
+## v0.0.18 - 2026-04-30
+
+### Changed
+
+- Fix ClawHub static scanner false-positive: replace new RegExp() with char-class regex literals in security-patterns.js
+
 ## v0.0.17 - 2026-04-30
 
 ### Changed
