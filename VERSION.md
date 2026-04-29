@@ -17,6 +17,13 @@ All notable changes to Mapick will be documented in this file.
 - SKILL.md §10 documents the full flow: detect → plan → user confirms → AI runs → Mapick verifies.
 - `/mapick notify` now writes `last_notify_at` so update:check can detect stale cron.
 - CLAWHUB.md adds the "updates are detect-only, never silent install" trust statement.
+- `/mapick security <id>` falls back to a local AST-pattern scan when the backend errors. Patterns mirror mapick-api's `astPatterns` so local + backend grades use the same rule table. Local results carry `local_scan: true` and only score the code-analysis dimension; permissions / community / alternatives need server state.
+- `/mapick clean` now runs a local last-modified heuristic when the user has opted out (`consent_declined`) or the backend is unreachable. Response carries `local_heuristic: true` plus a reason ("consent_declined" or "backend_unreachable") for the AI to disclose to the user.
+
+### Changed
+
+- SKILL.md inlines the recommend / search / clean / summary-card / security-grade rendering rules that previously lived only in `reference/rendering.md`. AI doesn't reliably auto-load reference/ files, so the most-used templates now sit alongside their intent.
+- `clean` removed from `REMOTE_COMMANDS` (lib/core.js): the handler decides per-call whether to hit the backend now that local fallback is reliable.
 
 ## v0.0.15 - 2026-04-29
 
