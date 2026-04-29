@@ -44,7 +44,18 @@ Always render: `openclaw skills install <slug>`. Slug resolution:
 
 NEVER show or run: raw `installCommands[].command`, `skillssh:` prefixes, full `org/repo/skill` paths, `npx @mapick/install`, or `clawhub install skillssh:...`. Applies to **both** recommendation install and bundle install.
 
-Rendering: `reference/rendering.md#recommend` and `#search`.
+### Rendering: recommend / search
+
+Filter `score < 0.4`. Show **3 items max**. For each item render exactly **two sentences** — no tables, no bulleted field lists:
+
+1. **Sentence 1 — the gap**: one concrete thing the user does manually today. Reference something they said, installed, or do. ("You merge ~12 PRs a week and review them by eyeballing the diff.")
+2. **Sentence 2 — the fix**: inline the skill name + safety badge (🟢A / 🟡B / 🔴C) inside prose, then say what manual work disappears. ("Code Review 🟢A turns that into one comment per blocker.")
+
+Append install count ONLY when ≥10K, as a trailing social-proof clause ("trusted by 23K teams"). Never as a separate field. Grade C → use `alternatives[0]` instead and write the same two sentences about it. Open with a problem statement, not a catalog. Close with: "These three close your <area> loop. Reply 1 / 2 / 3 to install, or 'install all'."
+
+NEVER show raw `score` numbers, or render as a markdown table or bulleted catalog like `- Skill — benefit — 🟢A — 23K installs`. The user should feel "this is for ME", not "here are some products".
+
+For `search` with empty `items` (or `emptyReason: "no_matches"`): suggest broadening keywords, picking a category, or running `recommend` instead. Otherwise render like `recommend` (3-5 items max).
 
 ---
 
@@ -105,10 +116,13 @@ Command: `/mapick security <skillId>`
 Backend returns `matched: true` (with grade) or `matched: false` (with `suggestions[]`).
 
 Display rule (STRICT):
-- **Grade A** — celebrate, make user feel good.
-- **Grade B** — create tension, explain elevated signals, end "install anyway, or check the alternative?"
-- **Grade C** — dramatic reveal: "🚫 I would NOT install this." Lead with worst finding, show alternatives. **DO NOT show C-grade as installable.**
-- `lastScannedAt: null` — say "not yet scanned".
+- **Grade A** — celebrate. "✅ Clean bill of health. No suspicious code, permissions match what it actually uses, community trusts it." Make user feel good.
+- **Grade B** — create tension. "⚠️ Not a dealbreaker, but worth knowing..." Explain what specific signals are elevated. ("It requests network:all but only uses network:api — like asking for a master key when it only needs one room.") End: "Install anyway, or check the alternative?"
+- **Grade C** — **dramatic reveal.** "🚫 I would NOT install this." Lead with worst finding first (eval(), rm -rf, data exfil pattern). Then "Here's what I'd use instead:" → show `alternatives[]` with their Grade A scores. **DO NOT show the C-grade skill as installable.**
+- `lastScannedAt: null` — "⚠️ This skill hasn't been scanned yet. That doesn't mean it's bad — nobody's checked. Proceed with caution or wait for a scan."
+- `local_scan: true` — backend was unreachable; the result is a local pattern-only scan. Tell the user explicitly ("Backend unreachable, this is a local-only pattern scan; permissions/community signals not available") before applying the Grade A/B/C tone.
+
+When `matched: false`, render `suggestions[]` as a numbered short list and ask which one the user meant; on pick, re-call `security <picked.skillId>`.
 
 ### Intent: security:report
 Triggers: report X as malicious, flag X, X is suspicious.
@@ -170,15 +184,24 @@ Full install flow + failure playbook: `reference/flows.md#bundle-two-step-instal
 Triggers: clean, zombies, dead skills, prune.
 Command: `node scripts/shell.js clean`
 
-Open with impact (not count). Split: "Never used" vs "Used to be useful". End with: "Reply 'clean all' or pick numbers."
+### Rendering: clean
 
-On user pick: `clean:track <skillId>` then `uninstall <skillId> --confirm`.
+1. **Open with impact, not count.** Not "Found N zombie skills" but: "Your agent is carrying N dead skills. They eat <X>% of your context window every conversation — you're paying in speed and compute for zero value back."
+2. **Split into two groups:**
+   - "Never used (why did you install these?):" — 0 calls. Show install date: "installed 61 days ago, never once used".
+   - "Used to be useful:" — calls but idle 30+ days. Show last use date: "last used 47 days ago".
+3. **Before/after:** "Clean all N → context drops from <X>% to <Y>%, every response gets faster."
+4. **Make cleanup easy:** "Reply 'clean all' to remove everything, or pick numbers (e.g. '1-8 15 17')."
+
+Goal: user feels slightly embarrassed about hoarding, then satisfied after cleaning.
+
+On user pick: numbers → look up skillIds from last list, run `clean:track <id>` then `uninstall <id> --confirm` per skill. `all` → apply to every zombie. `skip` → reply "ok". Reason is `zombie_cleanup` (server-side); do NOT ask the user for one.
+
+`local_heuristic: true` in the response means the backend was unreachable / the user opted out — say so explicitly ("Backend unreachable; this is local heuristics only — last-modified > 30 days. Backend usage data not available").
 
 ### Intent: uninstall
 Triggers: uninstall, remove skill, delete skill.
 Command: `node scripts/shell.js uninstall <skillId> --confirm`. Default `--scope both`.
-
-Impact-first template: `reference/rendering.md#clean`.
 
 ---
 
@@ -212,8 +235,44 @@ On new Mapick session, run `node scripts/shell.js init` (idempotent, 30-min cool
 
 If CONFIG.md lacks `first_run_complete`: run `node scripts/shell.js summary`, render the summary card, ask one workflow question, then on answer call `profile set` + `recommend --with-profile` + `first-run-done`. Output summary AND question in a SINGLE response.
 
+### Rendering: summary card
+
+```
+mapick: 📊 Scan complete. Here's what I found.
+
+🔒 Privacy
+Your redaction engine is live — <privacy_rules> rules active.
+Provider access strings, certificates, and personal IDs → auto-stripped
+before any skill can see them.
+
+📦 Your skill inventory
+<total> installed — but let's be honest:
+  ✅ <active> you actually use
+  ⚠️ <never_used> you've NEVER used (why are these here?)
+  💤 <idle_30> you stopped using over a month ago
+That's a <activation_rate> activation rate.
+
+🔥 Your heavy hitters
+1. <top_used[0].name>      <top_used[0].daily>x/day — your workhorse
+2. <top_used[1].name>      <top_used[1].daily>x/day
+3. <top_used[2].name>      <top_used[2].daily>x/day
+
+🛡️ Safety check
+<security.A> skills passed (Grade A)
+<security.B> flagged minor issues (Grade B)
+<security.C> I wouldn't trust (Grade C) — say "security <name>" to see why
+
+⚡ The bottom line
+<zombie_count> zombie skills are eating <context_waste_pct>% of your
+context window. Every conversation, your agent loads them for nothing.
+
+🔒 Outbound: anonymous device id + skill IDs you act on + timestamps.
+   Audit: /mapick privacy log    Decline: /mapick privacy decline
+```
+
+If `never_used == 0 && idle_30 == 0`: skip negativity → "Clean setup. Top 10%." If `total <= 3`: skip the zombie angle → "Just getting started — let me find tools that match your workflow." If `has_backend: false`: skip the heavy-hitters + safety-check sections; say "Backend offline; counts only."
+
 Full 6-step flow: `reference/flows.md#first-run-summary`.
-Summary card layout: `reference/rendering.md#summary-card`.
 
 ---
 
