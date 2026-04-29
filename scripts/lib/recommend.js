@@ -10,7 +10,7 @@ async function handleRecommend(args, ctx) {
   const withProfile = args.includes("--with-profile");
   const numericArgs = args.filter((a) => !a.startsWith("--"));
   const limit = parseInt(numericArgs[0]) || 5;
-  const cacheKey = `recommend_${ctx.fp}`;
+  const cacheKey = `recommend_${ctx.fp}_${withProfile ? "profile" : "plain"}`;
   const cached = readCache(cacheKey);
 
   // Explicit limit or --with-profile bypasses the 24h cache.
