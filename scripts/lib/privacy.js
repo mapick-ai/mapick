@@ -94,6 +94,15 @@ async function handle(args, ctx) {
         };
       }
       const deleteResp = await httpCall("DELETE", "/users/data");
+      if (deleteResp && deleteResp.error) {
+        return {
+          intent: "privacy:delete-all",
+          backendCleared: false,
+          localCleared: false,
+          backendResponse: deleteResp,
+          hint: "Backend data was not deleted, so local state was preserved. Retry when the network/API is healthy.",
+        };
+      }
       fs.rmSync(CONFIG_FILE, { force: true });
       fs.rmSync(CACHE_DIR, { recursive: true, force: true });
       fs.rmSync(TRASH_DIR, { recursive: true, force: true });
@@ -104,6 +113,7 @@ async function handle(args, ctx) {
       );
       return {
         intent: "privacy:delete-all",
+        backendCleared: true,
         localCleared: true,
         backendResponse: deleteResp,
       };
