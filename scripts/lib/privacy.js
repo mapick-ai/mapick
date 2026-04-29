@@ -62,11 +62,12 @@ async function handle(args, ctx) {
         permission: "unredacted",
       });
       result.intent = "privacy:trust";
+      if (result.error) return result;
       const trusted = config.trusted_skills
         ? config.trusted_skills.split(",")
         : [];
-      trusted.push(args[1]);
-      writeConfig("trusted_skills", trusted.join(","));
+      if (!trusted.includes(args[1])) trusted.push(args[1]);
+      writeConfig("trusted_skills", trusted.filter(Boolean).join(","));
       return result;
     }
 
@@ -76,7 +77,12 @@ async function handle(args, ctx) {
         config.trusted_skills ? config.trusted_skills.split(",") : []
       ).filter((s) => s !== args[1]);
       writeConfig("trusted_skills", untrusted.join(","));
-      return { intent: "privacy:untrust", skillId: args[1] };
+      return {
+        intent: "privacy:untrust",
+        skillId: args[1],
+        scope: "local",
+        note: "Backend revoke endpoint is not available in this client; local trust is removed.",
+      };
     }
 
     case "delete-all": {
@@ -88,6 +94,15 @@ async function handle(args, ctx) {
         };
       }
       const deleteResp = await httpCall("DELETE", "/users/data");
+      if (deleteResp && deleteResp.error) {
+        return {
+          intent: "privacy:delete-all",
+          backendCleared: false,
+          localCleared: false,
+          backendResponse: deleteResp,
+          hint: "Backend data was not deleted, so local state was preserved. Retry when the network/API is healthy.",
+        };
+      }
       fs.rmSync(CONFIG_FILE, { force: true });
       fs.rmSync(CACHE_DIR, { recursive: true, force: true });
       fs.rmSync(TRASH_DIR, { recursive: true, force: true });
@@ -98,6 +113,7 @@ async function handle(args, ctx) {
       );
       return {
         intent: "privacy:delete-all",
+        backendCleared: true,
         localCleared: true,
         backendResponse: deleteResp,
       };

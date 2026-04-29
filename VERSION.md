@@ -125,7 +125,7 @@ All notable changes to Mapick will be documented in this file.
 
 ### Reverted
 
-- Fix bug.
+- `process.env.MAPICK_API_BASE` env-var override on `API_BASE`, accidentally re-introduced in v0.0.4. The indirection had been intentionally removed earlier; it stays out. The v0.0.4 `?repo=mapick-ai/mapick` query-param fix on `/notify/daily-check` is preserved.
 
 ## v0.0.4 - 2026-04-28
 
