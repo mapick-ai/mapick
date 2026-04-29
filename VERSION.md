@@ -2,6 +2,12 @@
 
 All notable changes to Mapick will be documented in this file.
 
+## v0.0.13 - 2026-04-29
+
+### Changed
+
+- Scan-safe build: removed all subprocess execution (fetch replaces curl, redact runs in-process, cron registration disabled)
+
 ## v0.0.12 - 2026-04-29
 
 ### Changed
