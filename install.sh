@@ -466,8 +466,18 @@ if [[ "${BACKUP_KEEP}" =~ ^[0-9]+$ ]] && (( BACKUP_KEEP > 0 )); then
 fi
 
 # -- Summary -------------------------------------------------------------------
+# Re-check shadow at the END of install. If both a managed install AND a
+# workspace copy now exist, OpenClaw will still load the workspace one and
+# the upgrade is silently shadowed. Only show the reminder when both exist —
+# a single install (managed-only OR workspace-only) is fine.
+shadow_remaining=0
+if [[ -f "${target_dir}/SKILL.md" ]] \
+   && [[ -f "${workspace_skill_dir}/SKILL.md" ]] \
+   && grep -Eq '^name:[[:space:]]*mapick[[:space:]]*$' "${workspace_skill_dir}/SKILL.md"; then
+  shadow_remaining=1
+fi
 
-json_event done state="${CONFLICT_STATE}" version="${VERSION}" target="${target_dir}"
+json_event done state="${CONFLICT_STATE}" version="${VERSION}" target="${target_dir}" shadow_remaining="${shadow_remaining}"
 
 if [[ "${JSON_MODE}" == "1" ]]; then
   exit 0
@@ -484,6 +494,20 @@ if [[ "${did_backup}" == "1" ]]; then
   echo -e "  ${GREEN}Backup${NC}:  ${backup_dir}"
 fi
 echo ""
+
+if [[ "${shadow_remaining}" == "1" ]]; then
+  echo -e "  ${YELLOW}⚠️  Shadow still active${NC}"
+  echo ""
+  echo "  You have a workspace copy at:"
+  echo -e "    ${YELLOW}${workspace_skill_dir}${NC}"
+  echo ""
+  echo "  OpenClaw loads workspace before managed, so the upgrade you just"
+  echo "  installed is shadowed. To activate it:"
+  echo ""
+  echo "    rm -rf ~/.openclaw/workspace/skills/mapick"
+  echo "    openclaw gateway restart"
+  echo ""
+fi
 
 echo -e "  ${BLUE}Get started:${NC}"
 echo "    /mapick                View status overview"
