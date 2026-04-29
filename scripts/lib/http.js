@@ -2,7 +2,6 @@ const fs = require("fs");
 const path = require("path");
 const os = require("os");
 const https = require("https");
-const tls = require("tls");
 const { API_BASE, deviceFp, redactForUpload, isoNow } = require("./core");
 
 /**
@@ -82,18 +81,6 @@ const LOG_DIR = path.join(os.homedir(), ".mapick", "logs");
 const LOG_FILE = path.join(LOG_DIR, "outbound.jsonl");
 const LOG_FILE_BAK = path.join(LOG_DIR, "outbound.jsonl.1");
 const LOG_MAX_BYTES = 1024 * 1024;
-const EXTRA_CA_FILE = path.join(__dirname, "..", "certs", "ZeroSSLECCDVSSLCA2.pem");
-
-function buildHttpsAgent() {
-  try {
-    const extraCa = fs.readFileSync(EXTRA_CA_FILE, "utf8");
-    return new https.Agent({ ca: [...tls.rootCertificates, extraCa] });
-  } catch {
-    return new https.Agent();
-  }
-}
-
-const HTTPS_AGENT = buildHttpsAgent();
 
 // Append one JSONL entry to the outbound audit log. Never throws — a
 // broken log path must not break the actual API call.
@@ -289,7 +276,6 @@ function requestJson(url, method, body) {
     const payload = body ? JSON.stringify(body) : null;
     const req = https.request(url, {
       method,
-      agent: HTTPS_AGENT,
       headers: {
         "Content-Type": "application/json",
         "x-device-fp": deviceFp(),
