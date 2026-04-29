@@ -183,7 +183,7 @@ context window. Every conversation, your agent loads them for nothing.
 Clean them and everything gets faster.
 
 🔒 Outbound: anonymous device id + skill IDs you act on + timestamps.
-   Audit: /mapick privacy log    Decline: /mapick privacy decline
+   Audit: /mapick privacy log    Decline: /mapick privacy consent-decline
 ```
 
 If `never_used == 0 && idle_30 == 0`: skip negativity → "Clean setup. Everything you installed, you actually use. That puts you in the top 10%."

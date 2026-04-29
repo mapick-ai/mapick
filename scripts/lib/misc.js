@@ -41,6 +41,10 @@ async function handleWeekly(_args, ctx) {
 // Single GET /notify/daily-check; backend handles version cmp + zombies + activity bump.
 async function handleNotify() {
   const installedVer = readInstalledVersion() || "";
+  // Local / dev builds are by definition ahead of any tagged release; don't
+  // surface mapick_self version alerts for them — that just nags during dev
+  // validation. Still write last_notify_at + return silence-first {alerts:[]}.
+  const isDevBuild = /^(local|dev)-/.test(installedVer);
   // Backend has a per-repo allowlist; without `repo` it returns alerts: [].
   const params = new URLSearchParams();
   if (installedVer) params.set("currentVersion", installedVer);
@@ -49,18 +53,20 @@ async function handleNotify() {
   params.set("limit", String(OUT_ARR));
   const resp = await httpCall("GET", `/notify/daily-check?${params}`);
   // Silence-first: backend/network failure → empty alerts.
-  if (resp.error) return { intent: "notify", alerts: [] };
+  if (resp.error) return { intent: "notify", alerts: [], dev_build: isDevBuild };
   if (Array.isArray(resp.alerts) && installedVer) {
     const baseVersion = installedVer.split("-")[0];
     resp.alerts = resp.alerts.filter((alert) => {
       if (alert?.type !== "version") return true;
+      // Drop version alerts entirely on dev builds.
+      if (isDevBuild) return false;
       return !(alert.latest && baseVersion === String(alert.latest).split("-")[0]);
     });
   }
   // Track liveness — used by `update:check` to detect stale notify and prompt
   // the user to (re)set up the cron.
   writeConfig("last_notify_at", isoNow());
-  return { intent: "notify", ...resp };
+  return { intent: "notify", dev_build: isDevBuild, ...resp };
 }
 
 async function handleBundle(args, ctx) {
@@ -246,14 +252,21 @@ function handleDiagnose() {
   const version = readInstalledVersion();
 
   const home = process.env.HOME || "";
-  const workspaceDuplicate = path.join(
-    home,
-    ".openclaw",
-    "workspace",
-    "skills",
-    "mapick",
+  // shadow_risk is only real when BOTH a managed install AND a workspace copy
+  // exist — only then does OpenClaw's "workspace beats managed" load order
+  // silently override the managed install. A workspace-only install (the most
+  // common dev path) is fine and shouldn't trip the warning.
+  const managedSkillFile = path.join(
+    home, ".openclaw", "skills", "mapick", "SKILL.md",
   );
-  const duplicateExists = fs.existsSync(path.join(workspaceDuplicate, "SKILL.md"));
+  const workspaceDuplicate = path.join(
+    home, ".openclaw", "workspace", "skills", "mapick",
+  );
+  const workspaceSkillFile = path.join(workspaceDuplicate, "SKILL.md");
+  const managedExists = fs.existsSync(managedSkillFile);
+  const workspaceExists = fs.existsSync(workspaceSkillFile);
+  const shadowRisk = managedExists && workspaceExists;
+
   const skillFile = path.join(CONFIG_DIR, "SKILL.md");
   let skillMtime = null;
   try {
@@ -265,9 +278,9 @@ function handleDiagnose() {
     version,
     loaded_dir: CONFIG_DIR,
     skill_mtime: skillMtime,
-    duplicate_workspace_skill: duplicateExists ? workspaceDuplicate : null,
-    shadow_risk: duplicateExists,
-    fix_hint: duplicateExists
+    duplicate_workspace_skill: shadowRisk ? workspaceDuplicate : null,
+    shadow_risk: shadowRisk,
+    fix_hint: shadowRisk
       ? "Move the workspace copy outside ~/.openclaw/workspace/skills and restart the OpenClaw gateway."
       : null,
   };
