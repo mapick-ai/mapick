@@ -2,6 +2,12 @@
 
 All notable changes to Mapick will be documented in this file.
 
+## v0.0.23 - 2026-04-30
+
+### Changed
+
+- Move backend health check to standalone netchk.js to eliminate file-read+network false positive
+
 ## v0.0.22 - 2026-04-30
 
 ### Changed
