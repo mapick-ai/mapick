@@ -90,7 +90,7 @@ error. Never include phrases like "let me check", "according to SKILL.md", or
 raw tool reasoning.
 
 If `usageDays < 7` or `totalInvocations < 50` → render brewing card, do NOT generate HTML.
-Otherwise generate self-contained HTML per `prompts/persona-production.md`, save to `/tmp/mapick-report-{id}.html`, then `share <reportId> <htmlFile> <locale>`.
+Otherwise generate self-contained HTML per `prompts/persona-production.md`, save only to `/tmp/mapick-report-{id}.html`, then `share <reportId> /tmp/mapick-report-{id}.html <locale>`. Never pass any other local file path to `share`.
 
 Rate limits: report/share 10/day per fp; HTML > 200KB → 413, regenerate shorter.
 

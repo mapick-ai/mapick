@@ -185,9 +185,9 @@ function isConsentDeclined(config) {
   return config.consent_declined === "true";
 }
 
-// Pipes text through scripts/redact.js. Used by http.js (audit-mode) and
-// share command (true redaction of HTML). Returns original text on any
-// failure — never throws — so a broken redact engine doesn't break Mapick.
+// Pipes text through scripts/redact.js. Used by http.js in audit-mode.
+// Returns original text on failure so a broken audit check does not break
+// normal API calls; upload flows use redactForUpload() instead.
 function redact(text) {
   if (!text) return text;
   const config = readConfig();
@@ -206,11 +206,34 @@ function redact(text) {
   }
 }
 
+function redactForUpload(text) {
+  if (!text) return { ok: false, error: "empty_upload" };
+  const config = readConfig();
+  if (config.redact_disabled === "true") {
+    return { ok: false, error: "redaction_disabled" };
+  }
+  if (!fs.existsSync(REDACTJS_PATH)) {
+    return { ok: false, error: "redaction_engine_missing" };
+  }
+  try {
+    const redacted = execFileSync(process.execPath, [REDACTJS_PATH], {
+      input: text,
+      encoding: "utf8",
+      maxBuffer: 8 * 1024 * 1024,
+      timeout: 5000,
+    }).trim();
+    if (!redacted) return { ok: false, error: "redaction_empty_result" };
+    return { ok: true, text: redacted };
+  } catch (err) {
+    return { ok: false, error: "redaction_failed", message: err.message };
+  }
+}
+
 module.exports = {
   CONFIG_DIR, SCRIPTS_DIR, CONFIG_FILE, TRASH_DIR, REDACTJS_PATH, API_BASE, CACHE_DIR, SKILLS_BASE,
   OUT_ARR, OUT_STR, SCAN_LIMIT,
   VALID_TRACK_ACTIONS, VALID_EVENT_ACTIONS, PROTECTED_SKILLS, REMOTE_COMMANDS,
   stableHash16, isoNow, clampOutput, parseFrontmatter, extractProfileTags,
   readConfig, writeConfig, deleteConfig, readCache, writeCache, deviceFp,
-  isProtected, isConsentDeclined, redact,
+  isProtected, isConsentDeclined, redact, redactForUpload,
 };
