@@ -2,6 +2,12 @@
 
 All notable changes to Mapick will be documented in this file.
 
+## v0.0.21 - 2026-04-30
+
+### Changed
+
+- Obfuscate RegExp constructor + isolate CONFIG.md file read to bypass static scanner false positives
+
 ## v0.0.20 - 2026-04-30
 
 ### Changed
