@@ -15,36 +15,35 @@ function scanSkills() {
   if (!fs.existsSync(SKILLS_BASE)) return skills;
   const dirs = fs.readdirSync(SKILLS_BASE);
   dirs.forEach((dir) => {
-    const skillPath = path.join(SKILLS_BASE, dir);
-    const skillFile = path.join(skillPath, "SKILL.md");
-    if (fs.statSync(skillPath).isDirectory() && fs.existsSync(skillFile)) {
+    try {
+      const skillPath = path.join(SKILLS_BASE, dir);
+      const linkStat = fs.lstatSync(skillPath);
+      if (linkStat.isSymbolicLink()) return;
+      const stat = fs.statSync(skillPath);
+      const skillFile = path.join(skillPath, "SKILL.md");
+      if (!stat.isDirectory() || !fs.existsSync(skillFile)) return;
       const content = fs.readFileSync(skillFile, "utf8");
       const fm = parseFrontmatter(content);
+      const skillStat = fs.statSync(skillFile);
       skills.push({
         id: dir,
         name: typeof fm.name === "string" && fm.name ? fm.name : dir,
         path: skillPath,
-        installed_at: fs.statSync(skillPath).birthtime.toISOString(),
-        last_modified: fs.statSync(skillFile).mtime.toISOString(),
+        installed_at: stat.birthtime.toISOString(),
+        last_modified: skillStat.mtime.toISOString(),
         enabled: fm.disabled !== true,
       });
-    }
+    } catch {}
   });
   return skills;
 }
 
-// Counts `[/` at line start — one per RULES tuple. Auto-follows redact.js changes.
 function countRedactRules() {
-  const candidates = [REDACTJS_PATH, path.join(SCRIPTS_DIR, "redact.js")];
-  for (const file of candidates) {
-    if (!fs.existsSync(file)) continue;
-    try {
-      const content = fs.readFileSync(file, "utf8");
-      const matches = content.match(/^\s*\[\//gm);
-      if (matches && matches.length > 0) return matches.length;
-    } catch {}
+  try {
+    return require("../redact").RULE_COUNT || 0;
+  } catch {
+    return 0;
   }
-  return 0;
 }
 
 function registerNotifyCron() {
@@ -146,8 +145,36 @@ async function handleInit(_args, ctx) {
     activation_rate:
       total > 0 ? `${Math.round((active / total) * 100)}%` : "0%",
     zombie_count: zombies.length,
-    never_used: skills.filter((s) => !s.last_modified).length,
+    never_used: skills.filter(
+      (s) => s.installed_at && s.last_modified === s.installed_at,
+    ).length,
   };
+}
+
+function statusFromSkills(skills) {
+  const zombieDays = parseInt(process.env.MAPICK_ZOMBIE_DAYS || "30", 10);
+  const now = Date.now();
+  const ageDays = (s) =>
+    (now - new Date(s.last_modified).getTime()) / 86_400_000;
+  const zombies = skills.filter((s) => ageDays(s) > zombieDays);
+  const total = skills.length;
+  const active = skills.filter(
+    (s) => s.enabled && ageDays(s) <= zombieDays,
+  ).length;
+  return {
+    intent: "status",
+    skills,
+    activation_rate:
+      total > 0 ? `${Math.round((active / total) * 100)}%` : "0%",
+    zombie_count: zombies.length,
+    never_used: skills.filter(
+      (s) => s.installed_at && s.last_modified === s.installed_at,
+    ).length,
+  };
+}
+
+function handleStatus() {
+  return statusFromSkills(scanSkills());
 }
 
 function handleScan() {
@@ -167,6 +194,7 @@ module.exports = {
   registerNotifyCron,
   aggregateSummary,
   handleInit,
+  handleStatus,
   handleScan,
   handleSummary,
 };
