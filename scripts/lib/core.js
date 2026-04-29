@@ -168,6 +168,32 @@ function isConsentDeclined(config) {
   return config.consent_declined === "true";
 }
 
+// Resolve installed Mapick version. OpenClaw 安装时会把版本写到
+// `<install-dir>/.version`，但开发模式（直接从 git clone 跑）没有该文件，
+// 此时 fallback 到 VERSION.md 的最新非 Unreleased 章节标题。
+//
+// 之前 misc.js / updates.js 都自己 readFileSync(.version)，没有 fallback，
+// 导致 dev clone 下 /mapick notify 与 update:check 永远不报 mapick_self
+// 更新。集中到这里一次性解决。
+function readInstalledVersion() {
+  const versionFile = path.join(CONFIG_DIR, ".version");
+  try {
+    const v = fs.readFileSync(versionFile, "utf8").trim();
+    if (v) return v;
+  } catch {}
+  // Fallback：解析 VERSION.md 第一个 `## vX.Y.Z` 标题（跳过 `## Unreleased`）。
+  // VERSION.md 与 CONFIG_DIR 同级，是项目里唯一权威的版本时间线。
+  const versionMd = path.join(CONFIG_DIR, "VERSION.md");
+  try {
+    const lines = fs.readFileSync(versionMd, "utf8").split("\n");
+    for (const line of lines) {
+      const m = line.match(/^##\s+(v\d+\.\d+\.\d+(?:-[\w.]+)?)\b/);
+      if (m) return m[1];
+    }
+  } catch {}
+  return null;
+}
+
 function redactForUpload(text) {
   if (!text) return { ok: false, error: "empty_upload" };
   const config = readConfig();
@@ -189,5 +215,5 @@ module.exports = {
   VALID_TRACK_ACTIONS, VALID_EVENT_ACTIONS, PROTECTED_SKILLS, REMOTE_COMMANDS,
   stableHash16, isoNow, clampOutput, parseFrontmatter, extractProfileTags,
   readConfig, writeConfig, deleteConfig, readCache, writeCache, deviceFp,
-  isProtected, isConsentDeclined, redactForUpload,
+  isProtected, isConsentDeclined, redactForUpload, readInstalledVersion,
 };
