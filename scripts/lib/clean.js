@@ -44,6 +44,18 @@ function resolveSkillTarget(targetId, args) {
 }
 
 function backupSkill(skillPath) {
+  const linkStat = fs.lstatSync(skillPath);
+  if (linkStat.isSymbolicLink()) {
+    const err = new Error("symlink_skill");
+    err.code = "symlink_skill";
+    throw err;
+  }
+  const stat = fs.statSync(skillPath);
+  if (!stat.isDirectory()) {
+    const err = new Error("not_a_directory");
+    err.code = "not_a_directory";
+    throw err;
+  }
   if (!fs.existsSync(TRASH_DIR)) fs.mkdirSync(TRASH_DIR, { recursive: true });
 
   // 7-day TTL sweep so trash/ doesn't grow unbounded.
@@ -152,7 +164,20 @@ function handleUninstall(args) {
   const resolved = resolveSkillTarget(targetId, args);
   if (!resolved.ok) return resolved;
   const skillDir = resolved.path;
-  const backup = backupSkill(skillDir);
+  let backup;
+  try {
+    backup = backupSkill(skillDir);
+  } catch (err) {
+    return {
+      error: err.code || "backup_failed",
+      skillId: targetId,
+      source: resolved.source,
+      hint:
+        err.code === "symlink_skill"
+          ? "Refusing to uninstall a symlinked skill. Remove the link manually if intentional."
+          : err.message,
+    };
+  }
   fs.rmSync(skillDir, { recursive: true, force: true });
   return {
     intent: "uninstall",
@@ -172,7 +197,20 @@ function handleBackupCreate(args) {
   const id = args[0];
   const resolved = resolveSkillTarget(id, args);
   if (!resolved.ok) return resolved;
-  const backup = backupSkill(resolved.path);
+  let backup;
+  try {
+    backup = backupSkill(resolved.path);
+  } catch (err) {
+    return {
+      error: err.code || "backup_failed",
+      skillId: id,
+      source: resolved.source,
+      hint:
+        err.code === "symlink_skill"
+          ? "Refusing to back up a symlinked skill. Back up the real directory manually if intentional."
+          : err.message,
+    };
+  }
   return {
     intent: "backup:create",
     skillId: id,
