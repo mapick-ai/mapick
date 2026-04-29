@@ -2,6 +2,12 @@
 
 All notable changes to Mapick will be documented in this file.
 
+## v0.0.12 - 2026-04-29
+
+### Changed
+
+- Restrict persona share uploads and fail closed when redaction is unavailable
+
 ## v0.0.11 - 2026-04-29
 
 ### Changed
