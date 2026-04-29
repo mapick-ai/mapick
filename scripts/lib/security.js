@@ -1,15 +1,13 @@
 // security / security:report handlers.
 //
 // /mapick security <id> tries the backend first, then falls back to a local
-// pattern scan (lib/security-patterns.js) when the backend is unreachable.
+// pattern scan when the backend is unreachable (offline scanning removed — see v0.0.22).
 // Local results carry `local_scan: true` so the AI can disclose the limitation.
 
 const fs = require("fs");
 const path = require("path");
 const { apiCall, missingArg } = require("./http");
 const { SKILLS_BASES, OUT_ARR, isoNow } = require("./core");
-const RISK_PATTERNS = require("./security-patterns");
-
 const MAX_FILES = 30;
 const MAX_BYTES = 200 * 1024;
 const SCANNABLE_EXT = /\.(js|mjs|cjs|ts|tsx|sh|bash)$/i;
@@ -62,28 +60,18 @@ function scanLocal(skillId) {
     return { ok: false, reason: "no_scannable_files", source: target.source };
   }
 
-  let codeScore = 100;
-  const issues = [];
-  for (const file of files) {
-    let content;
-    try { content = fs.readFileSync(file, "utf8"); } catch { continue; }
-    for (const { pattern, penalty, desc, severity } of RISK_PATTERNS) {
-      if (pattern.test(content)) {
-        codeScore -= penalty;
-        issues.push({
-          file: path.relative(skillDir, file),
-          pattern: desc,
-          severity,
-        });
-      }
-    }
-  }
-  codeScore = Math.max(0, codeScore);
-
-  let grade;
-  if (codeScore >= 80) grade = "A";
-  else if (codeScore >= 50) grade = "B";
-  else grade = "C";
+  // Offline pattern scanning removed in v0.0.22 to eliminate ClawHub
+  // static-scanner false-positives on detection patterns.
+  // Local security checks require the backend.
+  return {
+    ok: true,
+    grade: null,
+    codeScore: null,
+    issues: [],
+    filesScanned: 0,
+    source: target.source,
+    note: "Local pattern scanning has been removed. The backend security API remains available for online checks.",
+  };
 
   return {
     ok: true,
