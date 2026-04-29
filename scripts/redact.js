@@ -132,7 +132,11 @@ function redact(text, codeAware = true) {
   return parts.join('');
 }
 
-const args = process.argv.slice(2);
-const codeAware = !args.includes('--no-code-aware');
-const input = args.find(a => !a.startsWith('--')) || fs.readFileSync(0, 'utf8');
-console.log(redact(input.trim(), codeAware));
+module.exports = { redact, applyRules, detectMetaTopics };
+
+if (require.main === module) {
+  const args = process.argv.slice(2);
+  const codeAware = !args.includes('--no-code-aware');
+  const input = args.find(a => !a.startsWith('--')) || fs.readFileSync(0, 'utf8');
+  console.log(redact(input.trim(), codeAware));
+}

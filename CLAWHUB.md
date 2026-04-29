@@ -40,7 +40,7 @@ Three opt-outs, one command each:
 | Network | `api.mapick.ai` only — endpoint allowlist refuses any other URL |
 | File read | `~/.openclaw/skills/`,`~/.openclaw/workspace/skills/` — scans installed Skills' SKILL.md |
 | File write | `~/.openclawworkspace//skills/mapick/CONFIG.md`, `trash/`, `~/.mapick/cache/`, `~/.mapick/logs/` |
-| Subprocess | `curl` (HTTPS, works around Nodejs); `node redact.js` (regex-only PII stripper, runs in subprocess for isolation); `openclaw cron` (registers the daily notify) |
+| Runtime | Node.js only. Network uses built-in `fetch`; redaction runs in-process; no subprocess execution is required. |
 
 ## Trust signals
 
@@ -50,10 +50,11 @@ Three opt-outs, one command each:
 - **Endpoint allowlist** — Mapick refuses to call any URL outside that
   manifest, even at runtime (returns `endpoint_not_allowed` and writes
   `blocked: true` to the audit log).
-- **Redaction pre-flight** — every outbound payload is checked against
-  20+ sensitive-pattern regex (`scripts/redact.js`) before sending.
-  Trigger is logged with `redact_warning: true`; payload is not silently
-  rewritten (avoids breaking API contracts).
+- **Redaction pre-flight** — every outbound JSON payload is checked against
+  20+ sensitive-pattern regex (`scripts/redact.js`) before sending. If
+  redaction is unavailable, upload is refused; if sensitive-looking values
+  are found, only the redacted body is sent and `redacted_payload: true`
+  is written to the audit log.
 - **Persona share guardrails** — share accepts only regular, non-symlink
   `/tmp/mapick-report-<id>.html` files up to 200KB. Upload is refused if
   redaction fails or has been disabled.
@@ -66,8 +67,6 @@ Three opt-outs, one command each:
 ## Requirements
 
 - OpenClaw runtime with **Node.js 22.14+** (24 recommended; the OpenClaw runtime baseline)
-- `curl`
-
 No `jq`, no Mapick account, no separate Node install — OpenClaw provides the runtime.
 
 ## First conversation after install

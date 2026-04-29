@@ -4,18 +4,13 @@
 const fs = require("fs");
 const path = require("path");
 const os = require("os");
-const { execFileSync } = require("child_process");
+const redactionEngine = require("../redact");
 
 // __dirname is mapick/scripts/lib; CONFIG_DIR should be mapick/.
 const CONFIG_DIR = path.dirname(path.dirname(__dirname));
 const SCRIPTS_DIR = path.dirname(__dirname);
 const CONFIG_FILE = path.join(CONFIG_DIR, "CONFIG.md");
 const TRASH_DIR = path.join(CONFIG_DIR, "trash");
-// redact.js lives next to shell.js (scripts/), NOT at CONFIG_DIR root.
-// The CONFIG_DIR-based path silently no-op'd redact() — fs.existsSync
-// returned false → early return — so `share` was uploading raw HTML
-// with zero redaction. countRedactRules() already pointed at SCRIPTS_DIR;
-// REDACTJS_PATH had drifted.
 const REDACTJS_PATH = path.join(SCRIPTS_DIR, "redact.js");
 const API_BASE = "https://api.mapick.ai/api/v1";
 const CACHE_DIR = path.join(os.homedir(), ".mapick", "cache");
@@ -29,20 +24,8 @@ const VALID_EVENT_ACTIONS = ["skill_install", "skill_invoke", "skill_idle", "ski
 const PROTECTED_SKILLS = ["mapick", "tasa"];
 const REMOTE_COMMANDS = new Set(["recommend", "recommend:track", "search", "workflow", "daily", "weekly", "report", "security", "security:report", "clean", "clean:track", "share"]);
 
-// Priority: env override → ~/.openclaw → ~/.claude → ~/.codex.
 function detectSkillsBase() {
-  const home = os.homedir();
-  const candidates = [
-    process.env.SKILLS_BASE,
-    process.env.MAPICK_SKILLS_BASE,
-    path.join(home, ".openclaw", "skills"),
-    path.join(home, ".claude", "skills"),
-    path.join(home, ".codex", "skills"),
-  ].filter(Boolean);
-  for (const dir of candidates) {
-    if (fs.existsSync(dir)) return dir;
-  }
-  return candidates[0] || path.join(home, ".openclaw", "skills");
+  return path.join(os.homedir(), ".openclaw", "skills");
 }
 const SKILLS_BASE = detectSkillsBase();
 
@@ -185,43 +168,14 @@ function isConsentDeclined(config) {
   return config.consent_declined === "true";
 }
 
-// Pipes text through scripts/redact.js. Used by http.js in audit-mode.
-// Returns original text on failure so a broken audit check does not break
-// normal API calls; upload flows use redactForUpload() instead.
-function redact(text) {
-  if (!text) return text;
-  const config = readConfig();
-  if (config.redact_disabled === "true") return text;
-  if (!fs.existsSync(REDACTJS_PATH)) return text;
-  try {
-    const result = execFileSync(process.execPath, [REDACTJS_PATH], {
-      input: text,
-      encoding: "utf8",
-      maxBuffer: 8 * 1024 * 1024,
-      timeout: 5000,
-    });
-    return result.trim();
-  } catch {
-    return text;
-  }
-}
-
 function redactForUpload(text) {
   if (!text) return { ok: false, error: "empty_upload" };
   const config = readConfig();
   if (config.redact_disabled === "true") {
     return { ok: false, error: "redaction_disabled" };
   }
-  if (!fs.existsSync(REDACTJS_PATH)) {
-    return { ok: false, error: "redaction_engine_missing" };
-  }
   try {
-    const redacted = execFileSync(process.execPath, [REDACTJS_PATH], {
-      input: text,
-      encoding: "utf8",
-      maxBuffer: 8 * 1024 * 1024,
-      timeout: 5000,
-    }).trim();
+    const redacted = redactionEngine.redact(text).trim();
     if (!redacted) return { ok: false, error: "redaction_empty_result" };
     return { ok: true, text: redacted };
   } catch (err) {
@@ -235,5 +189,5 @@ module.exports = {
   VALID_TRACK_ACTIONS, VALID_EVENT_ACTIONS, PROTECTED_SKILLS, REMOTE_COMMANDS,
   stableHash16, isoNow, clampOutput, parseFrontmatter, extractProfileTags,
   readConfig, writeConfig, deleteConfig, readCache, writeCache, deviceFp,
-  isProtected, isConsentDeclined, redact, redactForUpload,
+  isProtected, isConsentDeclined, redactForUpload,
 };
