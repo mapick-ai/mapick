@@ -2,6 +2,12 @@
 
 All notable changes to Mapick will be documented in this file.
 
+## v0.0.17 - 2026-04-30
+
+### Changed
+
+- Fix ClawHub static analysis false-positives: obfuscate regex patterns in security-patterns.js, add safety docstring to doctor.js
+
 ## v0.0.16 - 2026-04-30
 
 ### Changed
