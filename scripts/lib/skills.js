@@ -201,6 +201,13 @@ async function handleInit(_args, ctx) {
   };
 }
 
+async function handleStatus(_args, ctx) {
+  const skills = scanSkills();
+  const fresh = readConfig();
+  fresh.device_fp = fresh.device_fp || ctx.fp;
+  return aggregateSummary(skills, fresh);
+}
+
 function handleScan() {
   return { intent: "scan", skills: scanSkills(), scanned_at: isoNow() };
 }
@@ -219,6 +226,7 @@ module.exports = {
   registerNotifyCron,
   aggregateSummary,
   handleInit,
+  handleStatus,
   handleScan,
   handleSummary,
 };
