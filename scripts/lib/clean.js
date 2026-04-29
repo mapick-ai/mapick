@@ -178,6 +178,7 @@ function handleUninstall(args) {
           : err.message,
     };
   }
+
   fs.rmSync(skillDir, { recursive: true, force: true });
   return {
     intent: "uninstall",
@@ -211,6 +212,7 @@ function handleBackupCreate(args) {
           : err.message,
     };
   }
+
   return {
     intent: "backup:create",
     skillId: id,
