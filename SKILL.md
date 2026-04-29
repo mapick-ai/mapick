@@ -368,6 +368,56 @@ context window. Every conversation, your agent loads them for nothing.
 
 If `never_used == 0 && idle_30 == 0`: skip negativity → "Clean setup. Top 10%." If `total <= 3`: skip the zombie angle → "Just getting started — let me find tools that match your workflow." If `has_backend: false`: skip the heavy-hitters + safety-check sections; say "Backend offline; counts only."
 
+### AI Taste Tags (generate from summary data, no extra API call)
+
+After rendering the summary card, generate **2–3 taste tags** from the data already returned by `summary`. No extra command, no backend call. Persona report stays brewing — these tags are a separate, lightweight day-1 artifact.
+
+Lookup tables:
+
+**Quantity** (from `total`):
+- `total >= 40` → `收藏癖 Collector`
+- `total 15–39` → `实用主义 Pragmatist`
+- `total 5–14` → `极简主义 Minimalist`
+- `total < 5` → `刚起步 Newbie`
+
+**Efficiency** (from `active / total`):
+- `< 30%` → `囤货不用型 Hoarder`
+- `30–60%` → `还在探索 Explorer`
+- `60–90%` → `效率选手 Optimizer`
+- `> 90%` → `断舍离大师 Marie Kondo`
+
+**Stack** (from `top_used[].name`):
+- contains `github` / `docker` / `k8s` → `硬核极客 Hardcore Geek`
+- contains `summarize` / `writing` / `content` → `内容创作者 Creator`
+- contains `data-analysis` / `visualization` → `数据控 Data Nerd`
+- contains `productivity` / `calendar` / `email` → `效率狂人 Productivity Freak`
+- mixed / unrecognizable → `杂食动物 Omnivore`
+
+**Bonus** (only if `never_used > 5`):
+- `装了不用协会会长 Install-and-Forget Champion`
+
+Pick the **3 most interesting** (most differentiating). Rendering format:
+
+```
+🎯 你的 AI 品味：「{tag1} + {tag2} + {tag3}」
+```
+
+Then one 冷知识 line comparing to other users using `total`:
+- `total > 40` → `你装的 Skill 数量超过 82% 的用户`
+- `total > 20` → `…超过 60% 的用户`
+- `total > 10` → `…超过 40% 的用户`
+- otherwise: skip the 冷知识 line
+
+End with the share CTA:
+
+```
+📤 测测你朋友的 → /mapick status
+```
+
+(The `s.mapick.ai` share link will land in V2; today the CTA bounces a friend through the same first-run flow.)
+
+Skip the entire taste-tags block when `total == 0` (a fresh install with no skills installed yet — no signal to riff on).
+
 Full 6-step flow: `reference/flows.md#first-run-summary`.
 
 ---
