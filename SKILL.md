@@ -18,6 +18,7 @@ Priority: **recommendation = privacy > persona > safety score > cleanup > everyt
   you are reading SKILL.md, loading reference files, checking handlers, or
   deciding which tool to call. Run the command and render only the final
   user-facing result.
+- **Use the literal command names registered in `scripts/shell.js` HANDLERS — do not abbreviate or invent shorthand.** Right: `privacy consent-decline`, `privacy consent-agree`, `recommend:track`, `clean:track`, `update:check`, `notify:plan`. Wrong: `privacy decline`, `privacy agree`, `recommend track`, `update check`. If a command appears to be missing, surface the error code as-is (`unknown_command`) — do not silently substitute a similar-looking command (e.g. don't fall through to `summary` because `status` "looked wrong").
 
 Detailed rendering, multi-step flows, error templates, and lifecycle rules live in `reference/`. Load on demand.
 
@@ -248,6 +249,8 @@ Returns `{intent: "update:check", items: [...]}`. Each item is one update opport
 
 `settings.update_mode: "off"` returns empty items + an explainer message. Same when `consent_declined`.
 
+`dev_build: true` on the response means the running tree is a local / unreleased build (`local-<sha>-<ts>` etc.). Mapick suppresses `mapick_self` items in that case — say "Running a local dev build (`<installed_version>`); release-channel updates don't apply" and only render any remaining items (`skill` / `notify_missing`).
+
 ### Render `update:check`
 
 If `items: []` and no `message`: reply "Everything's up to date." If `items: []` with `message`: render the message verbatim. Otherwise:
@@ -310,7 +313,12 @@ NEVER auto-confirm. NEVER omit the `what_it_doesnt` line.
    - `kind: "instruction"` → execute the multi-step instruction in `instruction` text. Typically this means: run a list/inspect command, parse its output, then run zero-or-more derived commands. Capture each derived command's outcome.
    - Capture exit code + last 200 chars of stderr per command.
 2. On any failure: stop. If `after_failure_rollback`, run it. Tell user the exact failure (translate stderr).
-3. On full success: run `after_success_track`. Reply with one-line confirmation.
+3. On full success: run `after_success_track`.
+4. **For `notify:plan` only — verify delivery route before claiming success.** After step 3, run `openclaw cron list --json`, find the `mapick-notify` entry, then run `openclaw chat list --json` (or the equivalent on the active OpenClaw runtime) to confirm at least one chat route is registered. If no route exists, the cron will fire but fail-close — surface this to the user explicitly:
+
+   > ⚠️ Cron is scheduled, but no chat delivery route is configured. Set up a route with `openclaw chat add ...` or notifications will silently drop.
+
+   Do NOT report a clean "all set" without this check passing. Otherwise, reply with one-line confirmation.
 
 ### Settings
 
@@ -364,7 +372,7 @@ That's a <activation_rate> activation rate.
 context window. Every conversation, your agent loads them for nothing.
 
 🔒 Outbound: anonymous device id + skill IDs you act on + timestamps.
-   Audit: /mapick privacy log    Decline: /mapick privacy decline
+   Audit: /mapick privacy log    Decline: /mapick privacy consent-decline
 ```
 
 If `never_used == 0 && idle_30 == 0`: skip negativity → "Clean setup. Top 10%." If `total <= 3`: skip the zombie angle → "Just getting started — let me find tools that match your workflow." If `has_backend: false`: skip the heavy-hitters + safety-check sections; say "Backend offline; counts only."
