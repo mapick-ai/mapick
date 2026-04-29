@@ -16,6 +16,33 @@
 
 set -e
 
+# -- Platform check ------------------------------------------------------------
+# `install.sh` is bash-only. On Windows, OpenClaw users should run install via
+# WSL (Linux subsystem) — Git Bash / Cygwin / MSYS / MINGW environments don't
+# have the symlink + chmod + permissions semantics OpenClaw assumes, and
+# silently miscopying files there has historically wedged the install. Bail
+# before any destructive write.
+case "$(uname -s 2>/dev/null)" in
+  Linux*|Darwin*)
+    : # POSIX path, OK to proceed
+    ;;
+  CYGWIN*|MSYS*|MINGW*|MSYS_NT*|MINGW64_NT*|MINGW32_NT*)
+    echo "ERROR: install.sh detected a non-POSIX shell ($(uname -s))." >&2
+    echo "" >&2
+    echo "On Windows, install Mapick via WSL (Windows Subsystem for Linux):" >&2
+    echo "  1. Open PowerShell as administrator and run:  wsl --install" >&2
+    echo "  2. Reboot, open the Ubuntu app, then re-run install.sh inside WSL." >&2
+    echo "" >&2
+    echo "WSL setup: https://learn.microsoft.com/windows/wsl/install" >&2
+    exit 1
+    ;;
+  *)
+    # Unknown OS — let it proceed but warn. We've never tested here, so the
+    # user gets ownership of the outcome.
+    echo "WARN: unrecognized OS '$(uname -s 2>/dev/null)'. install.sh has only been tested on macOS / Linux / WSL — proceed at your own risk." >&2
+    ;;
+esac
+
 # -- Config --------------------------------------------------------------------
 
 REPO="${MAPICK_REPO:-mapick-ai/mapick}"
