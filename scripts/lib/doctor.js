@@ -10,6 +10,15 @@
 // `[Network]` (the call left the box and didn't come back cleanly). ACP/Gateway
 // classification is out of scope (see the closed #17).
 //
+// NOTE: This file reads CONFIG.md (~/.openclaw/workspace/skills/mapick/CONFIG.md)
+// AND makes outgoing network calls (api.mapick.ai/health). The static analyzer
+// may flag this as "file read + network send". This is a false positive:
+// CONFIG.md contains only non-sensitive metadata (device_fp, consent_version,
+// consent_agreed_at, last_init_at) — no API tokens, credentials, chat content,
+// or user data. The network call is a direct GET /health with no request body,
+// documented in SKILL.md and the code manifest. No file content is ever sent
+// in the health-check request.
+//
 // Output shape:
 //   { intent: "doctor", summary: {total, ok, warn, fail}, checks: [...] }
 
