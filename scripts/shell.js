@@ -31,6 +31,7 @@ const clean = require("./lib/clean");
 const security = require("./lib/security");
 const misc = require("./lib/misc");
 const updates = require("./lib/updates");
+const doctor = require("./lib/doctor");
 
 const HANDLERS = {
   init: skills.handleInit,
@@ -76,6 +77,7 @@ const HANDLERS = {
   "first-run-done": misc.handleFirstRunDone,
   diagnose: misc.handleDiagnose,
   version: misc.handleDiagnose,
+  doctor: doctor.handleDoctor,
   id: misc.handleId,
   help: misc.handleHelp,
   "--help": misc.handleHelp,
