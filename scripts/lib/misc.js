@@ -61,6 +61,9 @@ async function handleNotify() {
       return !(alert.latest && baseVersion === String(alert.latest).split("-")[0]);
     });
   }
+  // Track liveness — used by `update:check` to detect stale notify and prompt
+  // the user to (re)set up the cron.
+  writeConfig("last_notify_at", isoNow());
   return { intent: "notify", ...resp };
 }
 
