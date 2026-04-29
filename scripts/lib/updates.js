@@ -114,7 +114,11 @@ async function handleCheck(_args, ctx) {
 
   // 1. Mapick self version.
   const installedVer = readInstalledVersion();
-  if (installedVer) {
+  // Local / dev builds (`local-<sha>-<ts>` or `dev-*`) are by definition
+  // ahead of any tagged release, so don't surface mapick_self upgrade
+  // prompts for them — that just nags during `latest-code` validation.
+  const isDevBuild = installedVer && /^(local|dev)-/.test(installedVer);
+  if (installedVer && !isDevBuild) {
     const params = new URLSearchParams({
       currentVersion: installedVer,
       repo: "mapick-ai/mapick",
@@ -198,6 +202,8 @@ async function handleCheck(_args, ctx) {
     intent: "update:check",
     checked_at: isoNow(),
     settings: { update_mode: mode },
+    dev_build: isDevBuild || false,
+    installed_version: installedVer || null,
     items,
   };
 }

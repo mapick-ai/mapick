@@ -149,15 +149,17 @@ function checkCache() {
 }
 
 function checkShadow() {
+  // Only warn when BOTH a managed install AND a workspace copy exist —
+  // workspace-only is fine, managed-only is fine, both is the silent override.
+  const managedSkill = path.join(
+    os.homedir(), ".openclaw", "skills", "mapick", "SKILL.md",
+  );
   const wsDir = path.join(
-    os.homedir(),
-    ".openclaw",
-    "workspace",
-    "skills",
-    "mapick",
+    os.homedir(), ".openclaw", "workspace", "skills", "mapick",
   );
   const wsSkill = path.join(wsDir, "SKILL.md");
-  if (fs.existsSync(wsSkill)) {
+  const bothExist = fs.existsSync(managedSkill) && fs.existsSync(wsSkill);
+  if (bothExist) {
     return {
       id: "mapick.shadow",
       owner: "[Mapick]",
