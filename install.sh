@@ -5,12 +5,12 @@
 # recovery, CI, pinned versions, or environments without ClawHub access.
 # Always review the script before running it:
 #
-#   curl -fsSL https://raw.githubusercontent.com/mapick-ai/mapick/v0.0.11/install.sh -o install.sh
+#   curl -fsSL https://raw.githubusercontent.com/mapick-ai/mapick/v0.0.12/install.sh -o install.sh
 #   less install.sh
 #   bash install.sh
 #
 # Options (via environment variables):
-#   MAPICK_VERSION=v0.0.11  ./install.sh   # Install specific version
+#   MAPICK_VERSION=v0.0.12  ./install.sh   # Install specific version
 #   MAPICK_REPO=owner/repo ./install.sh   # Override source repo
 #   MAPICK_DISABLE_WORKSPACE_DUPLICATE=1  # Move shadowing workspace copy aside
 

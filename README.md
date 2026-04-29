@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-v0.0.11-blue?style=flat-square" alt="Version" />
+  <img src="https://img.shields.io/badge/version-v0.0.12-blue?style=flat-square" alt="Version" />
   <img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" alt="License" />
   <img src="https://img.shields.io/badge/platform-OpenClaw-purple?style=flat-square" alt="Platform" />
 </p>
@@ -93,7 +93,7 @@ openclaw skills install mapick
 Download, review, then run:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/mapick-ai/mapick/v0.0.11/install.sh -o install.sh
+curl -fsSL https://raw.githubusercontent.com/mapick-ai/mapick/v0.0.12/install.sh -o install.sh
 less install.sh   # review before running
 bash install.sh
 ```
@@ -101,7 +101,7 @@ bash install.sh
 Or with `wget`:
 
 ```bash
-wget https://raw.githubusercontent.com/mapick-ai/mapick/v0.0.11/install.sh
+wget https://raw.githubusercontent.com/mapick-ai/mapick/v0.0.12/install.sh
 bash install.sh
 ```
 
@@ -110,7 +110,7 @@ Pin a specific version:
 ```bash
 curl -fsSL https://raw.githubusercontent.com/mapick-ai/mapick/main/install.sh -o install.sh
 less install.sh
-MAPICK_VERSION=v0.0.11 bash install.sh
+MAPICK_VERSION=v0.0.12 bash install.sh
 
 ```
 
