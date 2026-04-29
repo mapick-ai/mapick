@@ -7,7 +7,8 @@ const {
   isoNow, writeConfig, deleteConfig,
   isConsentDeclined,
 } = require("./core");
-const { httpCall, missingArg, readOutboundLog } = require("./http");
+const { httpCall, missingArg } = require("./http");
+const { readOutboundLog } = require("./audit");
 const { registerNotifyCron } = require("./skills");
 
 function isRemoteCommand(command, args) {

@@ -95,26 +95,8 @@ function logOutbound(entry) {
   } catch {}
 }
 
-// Read both the active log and the rotated backup. Returns entries
-// in chronological order, oldest first; caller can slice as needed.
-function readOutboundLog() {
-  const lines = [];
-  for (const f of [LOG_FILE_BAK, LOG_FILE]) {
-    if (!fs.existsSync(f)) continue;
-    try {
-      const content = fs.readFileSync(f, "utf8");
-      content
-        .split("\n")
-        .filter(Boolean)
-        .forEach((line) => {
-          try {
-            lines.push(JSON.parse(line));
-          } catch {}
-        });
-    } catch {}
-  }
-  return lines;
-}
+// Audit-log read side lives in lib/audit.js — keeps file reads out
+// of the module that performs network sends.
 
 async function httpCall(method, endpoint, body = null) {
   const t0 = Date.now();
@@ -239,5 +221,4 @@ const missingArg = (hint) => ({ error: "missing_argument", hint });
 module.exports = {
   httpCall, apiCall, missingArg,
   ALLOWED_ENDPOINTS, isAllowedEndpoint,
-  readOutboundLog,
 };
