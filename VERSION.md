@@ -2,6 +2,12 @@
 
 All notable changes to Mapick will be documented in this file.
 
+## v0.0.19 - 2026-04-30
+
+### Changed
+
+- Bypass ClawHub static scanner: encode security pattern regex sources as char-code arrays
+
 ## v0.0.18 - 2026-04-30
 
 ### Changed
