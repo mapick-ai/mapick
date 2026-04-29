@@ -2,6 +2,12 @@
 
 All notable changes to Mapick will be documented in this file.
 
+## v0.0.10 - 2026-04-29
+
+### Changed
+
+- Workspace shadow detection, diagnose command, cron deduplication, opt-out display polish, ClawHub README split
+
 ## v0.0.9 - 2026-04-29
 
 ### Changed
