@@ -18,7 +18,7 @@ const { API_BASE, deviceFp, redact, isoNow } = require("./core");
  * GET  /bundle, /bundle/:id           bundleId (or none)              /mapick bundle
  * POST /bundle/seed                   bundleId, userId                bundle:track-installed
  * GET  /report/persona                device_fp                       /mapick report
- * POST /share/upload                  redacted HTML, reportId         /mapick share
+ * POST /share/upload                  redacted generated report HTML  /mapick share
  * GET  /skill/:id/security            skillId                         /mapick security <id>
  * POST /skill/:id/report              reason, evidenceEn              /mapick security:report
  * POST /users/trusted-skills          userId, skillId, permission     /mapick privacy trust
@@ -30,9 +30,11 @@ const { API_BASE, deviceFp, redact, isoNow } = require("./core");
  * Base URL: https://api.mapick.ai/api/v1 (also declared in SKILL.md
  * metadata.openclaw.permissions.network).
  *
- * NEVER sent: file contents, chat history, API tokens, credentials,
- * Skill source code, environment variables. The only outgoing identifier
- * is device_fp (anonymous 16-char hash of hostname|os|home).
+ * NEVER sent: arbitrary local file contents, chat history, API tokens,
+ * credentials, Skill source code, environment variables. The only outgoing
+ * identifier is device_fp (anonymous 16-char hash of hostname|os|home).
+ * Share uploads are restricted to Mapick-generated
+ * /tmp/mapick-report-<id>.html files after fail-closed redaction.
  *
  * Trust signals:
  *  - Endpoint allowlist (ALLOWED_ENDPOINTS below) — calls outside the

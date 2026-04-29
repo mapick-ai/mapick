@@ -5,7 +5,7 @@ const fs = require("fs");
 const path = require("path");
 const {
   CONFIG_DIR, OUT_ARR, VALID_EVENT_ACTIONS,
-  isoNow, extractProfileTags, redact,
+  isoNow, extractProfileTags, redactForUpload,
   writeConfig, deleteConfig,
   isConsentDeclined,
 } = require("./core");
@@ -116,14 +116,48 @@ async function handleReport() {
 async function handleShare(args) {
   if (args.length < 2) return missingArg("Usage: share <reportId> <htmlFile>");
   const [reportId, htmlFile] = args;
-  if (!fs.existsSync(htmlFile)) {
-    return { error: "file_not_found", file: htmlFile };
+  if (!/^[A-Za-z0-9_-]{1,80}$/.test(reportId)) {
+    return { error: "invalid_report_id", hint: "Report IDs may contain letters, numbers, underscore, or dash." };
   }
-  const htmlContent = redact(fs.readFileSync(htmlFile, "utf8"));
+  const absolute = path.resolve(htmlFile);
+  const tmpDir = fs.realpathSync("/tmp");
+  const basename = path.basename(absolute);
+  if (!/^mapick-report-[A-Za-z0-9_-]+\.html$/.test(basename)) {
+    return {
+      error: "invalid_share_file",
+      hint: "Share only uploads Mapick-generated reports saved as /tmp/mapick-report-<id>.html.",
+    };
+  }
+  if (!fs.existsSync(absolute)) {
+    return { error: "file_not_found", file: absolute };
+  }
+  const linkStat = fs.lstatSync(absolute);
+  if (linkStat.isSymbolicLink()) {
+    return { error: "invalid_share_file", hint: "Symlinks are not accepted for share uploads." };
+  }
+  let realPath;
+  try {
+    realPath = fs.realpathSync(absolute);
+  } catch {
+    return { error: "file_not_found", file: absolute };
+  }
+  if (path.dirname(realPath) !== tmpDir || path.basename(realPath) !== basename) {
+    return {
+      error: "invalid_share_file",
+      hint: "Share only uploads Mapick-generated reports saved as /tmp/mapick-report-<id>.html.",
+    };
+  }
+  const stat = fs.statSync(absolute);
+  if (!stat.isFile()) return { error: "invalid_share_file", hint: "Share target must be a regular file." };
+  if (stat.size > 200 * 1024) {
+    return { error: "share_too_large", max_bytes: 200 * 1024, actual_bytes: stat.size };
+  }
+  const redacted = redactForUpload(fs.readFileSync(absolute, "utf8"));
+  if (!redacted.ok) return { error: redacted.error, message: redacted.message };
   return apiCall(
     "POST",
     "/share/upload",
-    { reportId, html: htmlContent, locale: args[2] || "en" },
+    { reportId, html: redacted.text, locale: args[2] || "en" },
     "share",
   );
 }

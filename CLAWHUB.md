@@ -25,7 +25,7 @@ Mapick defaults to data-sharing **on**. Default install starts working immediate
 
 **Sent**: anonymous device fingerprint (16-char hash of `hostname|os|home`) + Skill IDs you act on + timestamps.
 
-**Never sent**: chat content, file contents, API tokens, credentials, Skill source, environment variables.
+**Never sent**: chat content, arbitrary local file contents, API tokens, credentials, Skill source, environment variables. Persona sharing uploads only Mapick-generated `/tmp/mapick-report-<id>.html` after fail-closed redaction.
 
 Three opt-outs, one command each:
 
@@ -54,6 +54,9 @@ Three opt-outs, one command each:
   20+ sensitive-pattern regex (`scripts/redact.js`) before sending.
   Trigger is logged with `redact_warning: true`; payload is not silently
   rewritten (avoids breaking API contracts).
+- **Persona share guardrails** — share accepts only regular, non-symlink
+  `/tmp/mapick-report-<id>.html` files up to 200KB. Upload is refused if
+  redaction fails or has been disabled.
 - **Audit log** — `~/.mapick/logs/outbound.jsonl` records every request,
   rotates at 1MB. Read with `/mapick privacy log [N]`.
 - **Skill uninstall** is two-step: `clean` only lists; `uninstall <id>`
