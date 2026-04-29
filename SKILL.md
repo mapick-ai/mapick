@@ -258,11 +258,16 @@ For `upgrade:plan <id>` to work, `<id>` should be `mapick` or any installed Skil
 
 When shell returns `{intent: "*:plan", commands, what_it_does, what_it_doesnt, stops}`:
 
+Each entry in `commands[]` has a `kind` field (default `"command"` if absent):
+- `kind: "command"` — render the literal `command` string in the plan box.
+- `kind: "instruction"` — render the `instruction` text as a paraphrase prefixed with "AI step:".
+
 ```
 I'll run:
 
-  $ <commands[0].command>
-  $ <commands[1].command>
+  $ <commands[0].command>           ← if kind: "command"
+  AI step: <commands[1].instruction>  ← if kind: "instruction"
+  $ <commands[2].command>
 
 What it does: <what_it_does>
 What it doesn't: <what_it_doesnt>
@@ -276,9 +281,10 @@ NEVER auto-confirm. NEVER omit the `what_it_doesnt` line.
 ### After user confirms
 
 1. For each step in `commands`:
-   - If `executes_in_mapick: true` → run via `node scripts/shell.js <subcommand>`.
-   - Otherwise → run via your bash tool (e.g. `openclaw skills install mapick`).
-   - Capture exit code + last 200 chars of stderr.
+   - `kind: "command"` AND `executes_in_mapick: true` → run via `node scripts/shell.js <subcommand>`.
+   - `kind: "command"` (default) → run the literal `command` via your bash tool.
+   - `kind: "instruction"` → execute the multi-step instruction in `instruction` text. Typically this means: run a list/inspect command, parse its output, then run zero-or-more derived commands. Capture each derived command's outcome.
+   - Capture exit code + last 200 chars of stderr per command.
 2. On any failure: stop. If `after_failure_rollback`, run it. Tell user the exact failure (translate stderr).
 3. On full success: run `after_success_track`. Reply with one-line confirmation.
 
