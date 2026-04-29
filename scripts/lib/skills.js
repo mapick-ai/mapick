@@ -3,47 +3,99 @@
 const fs = require("fs");
 const path = require("path");
 const {
-  CONFIG_DIR, REDACTJS_PATH, SCRIPTS_DIR, SKILLS_BASE,
+  CONFIG_DIR, REDACTJS_PATH, SCRIPTS_DIR, SKILLS_BASES,
   isoNow, parseFrontmatter,
   readConfig, writeConfig,
   isConsentDeclined,
 } = require("./core");
 const { httpCall } = require("./http");
 
+// Walk both ~/.openclaw/skills/ (managed) and ~/.openclaw/workspace/skills/
+// (workspace) and merge. OpenClaw loads workspace before managed, so when a
+// skill id appears in both we keep the workspace record but flag
+// `shadowed_by_managed: true` so the AI can mention it.
 function scanSkills() {
-  const skills = [];
-  if (!fs.existsSync(SKILLS_BASE)) return skills;
-  const dirs = fs.readdirSync(SKILLS_BASE);
-  dirs.forEach((dir) => {
+  const byId = new Map();
+  for (const { path: base, source } of SKILLS_BASES) {
+    if (!fs.existsSync(base)) continue;
+    let entries;
     try {
-      const skillPath = path.join(SKILLS_BASE, dir);
-      const linkStat = fs.lstatSync(skillPath);
-      if (linkStat.isSymbolicLink()) return;
-      const stat = fs.statSync(skillPath);
-      const skillFile = path.join(skillPath, "SKILL.md");
-      if (!stat.isDirectory() || !fs.existsSync(skillFile)) return;
-      const content = fs.readFileSync(skillFile, "utf8");
-      const fm = parseFrontmatter(content);
-      const skillStat = fs.statSync(skillFile);
-      skills.push({
-        id: dir,
-        name: typeof fm.name === "string" && fm.name ? fm.name : dir,
-        path: skillPath,
-        installed_at: stat.birthtime.toISOString(),
-        last_modified: skillStat.mtime.toISOString(),
-        enabled: fm.disabled !== true,
-      });
-    } catch {}
-  });
-  return skills;
+      entries = fs.readdirSync(base);
+    } catch {
+      continue;
+    }
+    for (const dir of entries) {
+      try {
+        const skillPath = path.join(base, dir);
+        const linkStat = fs.lstatSync(skillPath);
+        if (linkStat.isSymbolicLink()) continue;
+        const stat = fs.statSync(skillPath);
+        const skillFile = path.join(skillPath, "SKILL.md");
+        if (!stat.isDirectory() || !fs.existsSync(skillFile)) continue;
+        const content = fs.readFileSync(skillFile, "utf8");
+        const fm = parseFrontmatter(content);
+        const skillStat = fs.statSync(skillFile);
+        const record = {
+          id: dir,
+          name: typeof fm.name === "string" && fm.name ? fm.name : dir,
+          path: skillPath,
+          source,
+          installed_at: stat.birthtime.toISOString(),
+          last_modified: skillStat.mtime.toISOString(),
+          enabled: fm.disabled !== true,
+        };
+        if (byId.has(dir)) {
+          // Earlier iteration found this id under managed; workspace wins
+          // (matches OpenClaw load order). Mark the shadow on the new
+          // (workspace) record so callers can disambiguate.
+          record.shadowed_by_managed = true;
+        }
+        byId.set(dir, record);
+      } catch {}
+    }
+  }
+  return [...byId.values()];
 }
 
-function countRedactRules() {
-  try {
-    return require("../redact").RULE_COUNT || 0;
-  } catch {
-    return 0;
+// scanAllSkills returns one record per (id, source) — no dedup. Used by
+// uninstall to detect "skill exists in BOTH bases" ambiguity.
+function scanAllSkills() {
+  const out = [];
+  for (const { path: base, source } of SKILLS_BASES) {
+    if (!fs.existsSync(base)) continue;
+    let entries;
+    try {
+      entries = fs.readdirSync(base);
+    } catch {
+      continue;
+    }
+    for (const dir of entries) {
+      try {
+        const skillPath = path.join(base, dir);
+        const linkStat = fs.lstatSync(skillPath);
+        if (linkStat.isSymbolicLink()) continue;
+        const stat = fs.statSync(skillPath);
+        const skillFile = path.join(skillPath, "SKILL.md");
+        if (!stat.isDirectory() || !fs.existsSync(skillFile)) continue;
+        out.push({ id: dir, path: skillPath, source });
+      } catch {}
+    }
   }
+  return out;
+}
+
+// Counts `[/` at line start — one per RULES tuple. Auto-follows redact.js changes.
+function countRedactRules() {
+  const candidates = [REDACTJS_PATH, path.join(SCRIPTS_DIR, "redact.js")];
+  for (const file of candidates) {
+    if (!fs.existsSync(file)) continue;
+    try {
+      const content = fs.readFileSync(file, "utf8");
+      const matches = content.match(/^\s*\[\//gm);
+      if (matches && matches.length > 0) return matches.length;
+    } catch {}
+  }
+  return 0;
 }
 
 function registerNotifyCron() {
@@ -145,36 +197,8 @@ async function handleInit(_args, ctx) {
     activation_rate:
       total > 0 ? `${Math.round((active / total) * 100)}%` : "0%",
     zombie_count: zombies.length,
-    never_used: skills.filter(
-      (s) => s.installed_at && s.last_modified === s.installed_at,
-    ).length,
+    never_used: skills.filter((s) => !s.last_modified).length,
   };
-}
-
-function statusFromSkills(skills) {
-  const zombieDays = parseInt(process.env.MAPICK_ZOMBIE_DAYS || "30", 10);
-  const now = Date.now();
-  const ageDays = (s) =>
-    (now - new Date(s.last_modified).getTime()) / 86_400_000;
-  const zombies = skills.filter((s) => ageDays(s) > zombieDays);
-  const total = skills.length;
-  const active = skills.filter(
-    (s) => s.enabled && ageDays(s) <= zombieDays,
-  ).length;
-  return {
-    intent: "status",
-    skills,
-    activation_rate:
-      total > 0 ? `${Math.round((active / total) * 100)}%` : "0%",
-    zombie_count: zombies.length,
-    never_used: skills.filter(
-      (s) => s.installed_at && s.last_modified === s.installed_at,
-    ).length,
-  };
-}
-
-function handleStatus() {
-  return statusFromSkills(scanSkills());
 }
 
 function handleScan() {
@@ -190,11 +214,11 @@ async function handleSummary(_args, ctx) {
 
 module.exports = {
   scanSkills,
+  scanAllSkills,
   countRedactRules,
   registerNotifyCron,
   aggregateSummary,
   handleInit,
-  handleStatus,
   handleScan,
   handleSummary,
 };

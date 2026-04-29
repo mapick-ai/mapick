@@ -7,7 +7,7 @@
 const fs = require("fs");
 const path = require("path");
 const { apiCall, missingArg } = require("./http");
-const { SKILLS_BASE, OUT_ARR, isoNow } = require("./core");
+const { SKILLS_BASES, OUT_ARR, isoNow } = require("./core");
 const RISK_PATTERNS = require("./security-patterns");
 
 const MAX_FILES = 30;
@@ -42,14 +42,24 @@ function listScannableFiles(dir, files = [], totalBytes = { v: 0 }) {
   return files;
 }
 
+function resolveSkillDir(skillId) {
+  // Workspace beats managed when both exist (matches OpenClaw load order).
+  for (const { path: base, source } of [...SKILLS_BASES].reverse()) {
+    const p = path.join(base, skillId);
+    if (fs.existsSync(p)) return { path: p, source };
+  }
+  return null;
+}
+
 function scanLocal(skillId) {
-  const skillDir = path.join(SKILLS_BASE, skillId);
-  if (!fs.existsSync(skillDir)) {
+  const target = resolveSkillDir(skillId);
+  if (!target) {
     return { ok: false, reason: "not_installed_locally" };
   }
+  const skillDir = target.path;
   const files = listScannableFiles(skillDir);
   if (files.length === 0) {
-    return { ok: false, reason: "no_scannable_files" };
+    return { ok: false, reason: "no_scannable_files", source: target.source };
   }
 
   let codeScore = 100;
@@ -75,7 +85,14 @@ function scanLocal(skillId) {
   else if (codeScore >= 50) grade = "B";
   else grade = "C";
 
-  return { ok: true, grade, codeScore, issues, filesScanned: files.length };
+  return {
+    ok: true,
+    grade,
+    codeScore,
+    issues,
+    filesScanned: files.length,
+    source: target.source,
+  };
 }
 
 async function handleSecurity(args) {
@@ -109,6 +126,7 @@ async function handleSecurity(args) {
     intent: "security",
     matched: true,
     local_scan: true,
+    source: local.source,
     skillId,
     skillName: skillId,
     safetyGrade: local.grade,

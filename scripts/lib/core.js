@@ -27,10 +27,14 @@ const PROTECTED_SKILLS = ["mapick", "tasa"];
 // backend is unreachable, so it works in all states.
 const REMOTE_COMMANDS = new Set(["recommend", "recommend:track", "search", "workflow", "daily", "weekly", "notify", "report", "security", "security:report", "clean:track", "share"]);
 
-function detectSkillsBase() {
-  return path.join(os.homedir(), ".openclaw", "skills");
-}
-const SKILLS_BASE = detectSkillsBase();
+// Two skill roots OpenClaw loads from. Workspace is loaded BEFORE managed
+// (so a workspace copy with the same id shadows the managed one).
+const SKILLS_BASE = path.join(os.homedir(), ".openclaw", "skills");
+const WORKSPACE_SKILLS_BASE = path.join(os.homedir(), ".openclaw", "workspace", "skills");
+const SKILLS_BASES = [
+  { path: SKILLS_BASE, source: "managed" },
+  { path: WORKSPACE_SKILLS_BASE, source: "workspace" },
+];
 
 // Anonymous device fingerprint hash — not for auth.
 function stableHash16(input) {
@@ -213,7 +217,8 @@ function redactForUpload(text) {
 }
 
 module.exports = {
-  CONFIG_DIR, SCRIPTS_DIR, CONFIG_FILE, TRASH_DIR, REDACTJS_PATH, API_BASE, CACHE_DIR, SKILLS_BASE,
+  CONFIG_DIR, SCRIPTS_DIR, CONFIG_FILE, TRASH_DIR, REDACTJS_PATH, API_BASE, CACHE_DIR,
+  SKILLS_BASE, WORKSPACE_SKILLS_BASE, SKILLS_BASES,
   OUT_ARR, OUT_STR, SCAN_LIMIT,
   VALID_TRACK_ACTIONS, VALID_EVENT_ACTIONS, PROTECTED_SKILLS, REMOTE_COMMANDS,
   stableHash16, isoNow, clampOutput, parseFrontmatter, extractProfileTags,
