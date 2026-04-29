@@ -10,6 +10,18 @@ const { httpCall, apiCall, missingArg } = require("./http");
 const { scanSkills } = require("./skills");
 
 function backupSkill(skillPath) {
+  const linkStat = fs.lstatSync(skillPath);
+  if (linkStat.isSymbolicLink()) {
+    const err = new Error("symlink_skill");
+    err.code = "symlink_skill";
+    throw err;
+  }
+  const stat = fs.statSync(skillPath);
+  if (!stat.isDirectory()) {
+    const err = new Error("not_a_directory");
+    err.code = "not_a_directory";
+    throw err;
+  }
   if (!fs.existsSync(TRASH_DIR)) fs.mkdirSync(TRASH_DIR, { recursive: true });
 
   // 7-day TTL sweep so trash/ doesn't grow unbounded.
@@ -111,7 +123,19 @@ function handleUninstall(args) {
   if (!fs.existsSync(skillDir)) {
     return { error: "not_found", skillId: targetId };
   }
-  const backup = backupSkill(skillDir);
+  let backup;
+  try {
+    backup = backupSkill(skillDir);
+  } catch (err) {
+    return {
+      error: err.code || "backup_failed",
+      skillId: targetId,
+      hint:
+        err.code === "symlink_skill"
+          ? "Refusing to uninstall a symlinked skill. Remove the link manually if intentional."
+          : err.message,
+    };
+  }
   fs.rmSync(skillDir, { recursive: true, force: true });
   return {
     intent: "uninstall",
@@ -130,7 +154,19 @@ function handleBackupCreate(args) {
   if (!fs.existsSync(skillDir)) {
     return { error: "not_found", skillId: id };
   }
-  const backup = backupSkill(skillDir);
+  let backup;
+  try {
+    backup = backupSkill(skillDir);
+  } catch (err) {
+    return {
+      error: err.code || "backup_failed",
+      skillId: id,
+      hint:
+        err.code === "symlink_skill"
+          ? "Refusing to back up a symlinked skill. Back up the real directory manually if intentional."
+          : err.message,
+    };
+  }
   return {
     intent: "backup:create",
     skillId: id,

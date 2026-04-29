@@ -78,7 +78,6 @@ const META_TOPIC_PATTERNS = {
 
 const META_TOPIC_TO_REPLACEMENTS = {
   email: ['[EMAIL]'],
-  access_string: ['[REDACTED_ANTHROPIC]', '[REDACTED_STRIPE]', '[REDACTED_GLM]', '[REDACTED_OPENAI]', '[REDACTED_GITHUB]'],
   credit_card: ['[CARD]'],
   phone: ['[PHONE]', '[CN_PHONE]'],
 };
@@ -122,7 +121,7 @@ function redact(text, codeAware = true) {
     if (match.index > lastEnd) {
       parts.push(applyRules(text.slice(lastEnd, match.index), skipFamilies));
     }
-    parts.push(match[0]);
+    parts.push(applyRules(match[0], skipFamilies));
     lastEnd = match.index + match[0].length;
   }
   if (lastEnd < text.length) {
@@ -132,7 +131,7 @@ function redact(text, codeAware = true) {
   return parts.join('');
 }
 
-module.exports = { redact, applyRules, detectMetaTopics };
+module.exports = { redact, applyRules, detectMetaTopics, RULE_COUNT: RULES.length };
 
 if (require.main === module) {
   const args = process.argv.slice(2);
