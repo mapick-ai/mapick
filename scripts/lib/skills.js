@@ -3,34 +3,85 @@
 const fs = require("fs");
 const path = require("path");
 const {
-  CONFIG_DIR, REDACTJS_PATH, SCRIPTS_DIR, SKILLS_BASE,
+  CONFIG_DIR, REDACTJS_PATH, SCRIPTS_DIR, SKILLS_BASES,
   isoNow, parseFrontmatter,
   readConfig, writeConfig,
   isConsentDeclined,
 } = require("./core");
 const { httpCall } = require("./http");
 
+// Walk both ~/.openclaw/skills/ (managed) and ~/.openclaw/workspace/skills/
+// (workspace) and merge. OpenClaw loads workspace before managed, so when a
+// skill id appears in both we keep the workspace record but flag
+// `shadowed_by_managed: true` so the AI can mention it.
 function scanSkills() {
-  const skills = [];
-  if (!fs.existsSync(SKILLS_BASE)) return skills;
-  const dirs = fs.readdirSync(SKILLS_BASE);
-  dirs.forEach((dir) => {
-    const skillPath = path.join(SKILLS_BASE, dir);
-    const skillFile = path.join(skillPath, "SKILL.md");
-    if (fs.statSync(skillPath).isDirectory() && fs.existsSync(skillFile)) {
-      const content = fs.readFileSync(skillFile, "utf8");
-      const fm = parseFrontmatter(content);
-      skills.push({
-        id: dir,
-        name: typeof fm.name === "string" && fm.name ? fm.name : dir,
-        path: skillPath,
-        installed_at: fs.statSync(skillPath).birthtime.toISOString(),
-        last_modified: fs.statSync(skillFile).mtime.toISOString(),
-        enabled: fm.disabled !== true,
-      });
+  const byId = new Map();
+  for (const { path: base, source } of SKILLS_BASES) {
+    if (!fs.existsSync(base)) continue;
+    let entries;
+    try {
+      entries = fs.readdirSync(base);
+    } catch {
+      continue;
     }
-  });
-  return skills;
+    for (const dir of entries) {
+      try {
+        const skillPath = path.join(base, dir);
+        const linkStat = fs.lstatSync(skillPath);
+        if (linkStat.isSymbolicLink()) continue;
+        const stat = fs.statSync(skillPath);
+        const skillFile = path.join(skillPath, "SKILL.md");
+        if (!stat.isDirectory() || !fs.existsSync(skillFile)) continue;
+        const content = fs.readFileSync(skillFile, "utf8");
+        const fm = parseFrontmatter(content);
+        const skillStat = fs.statSync(skillFile);
+        const record = {
+          id: dir,
+          name: typeof fm.name === "string" && fm.name ? fm.name : dir,
+          path: skillPath,
+          source,
+          installed_at: stat.birthtime.toISOString(),
+          last_modified: skillStat.mtime.toISOString(),
+          enabled: fm.disabled !== true,
+        };
+        if (byId.has(dir)) {
+          // Earlier iteration found this id under managed; workspace wins
+          // (matches OpenClaw load order). Mark the shadow on the new
+          // (workspace) record so callers can disambiguate.
+          record.shadowed_by_managed = true;
+        }
+        byId.set(dir, record);
+      } catch {}
+    }
+  }
+  return [...byId.values()];
+}
+
+// scanAllSkills returns one record per (id, source) — no dedup. Used by
+// uninstall to detect "skill exists in BOTH bases" ambiguity.
+function scanAllSkills() {
+  const out = [];
+  for (const { path: base, source } of SKILLS_BASES) {
+    if (!fs.existsSync(base)) continue;
+    let entries;
+    try {
+      entries = fs.readdirSync(base);
+    } catch {
+      continue;
+    }
+    for (const dir of entries) {
+      try {
+        const skillPath = path.join(base, dir);
+        const linkStat = fs.lstatSync(skillPath);
+        if (linkStat.isSymbolicLink()) continue;
+        const stat = fs.statSync(skillPath);
+        const skillFile = path.join(skillPath, "SKILL.md");
+        if (!stat.isDirectory() || !fs.existsSync(skillFile)) continue;
+        out.push({ id: dir, path: skillPath, source });
+      } catch {}
+    }
+  }
+  return out;
 }
 
 // Counts `[/` at line start — one per RULES tuple. Auto-follows redact.js changes.
@@ -163,6 +214,7 @@ async function handleSummary(_args, ctx) {
 
 module.exports = {
   scanSkills,
+  scanAllSkills,
   countRedactRules,
   registerNotifyCron,
   aggregateSummary,
