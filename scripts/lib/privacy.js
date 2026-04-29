@@ -62,11 +62,12 @@ async function handle(args, ctx) {
         permission: "unredacted",
       });
       result.intent = "privacy:trust";
+      if (result.error) return result;
       const trusted = config.trusted_skills
         ? config.trusted_skills.split(",")
         : [];
-      trusted.push(args[1]);
-      writeConfig("trusted_skills", trusted.join(","));
+      if (!trusted.includes(args[1])) trusted.push(args[1]);
+      writeConfig("trusted_skills", trusted.filter(Boolean).join(","));
       return result;
     }
 
@@ -76,7 +77,12 @@ async function handle(args, ctx) {
         config.trusted_skills ? config.trusted_skills.split(",") : []
       ).filter((s) => s !== args[1]);
       writeConfig("trusted_skills", untrusted.join(","));
-      return { intent: "privacy:untrust", skillId: args[1] };
+      return {
+        intent: "privacy:untrust",
+        skillId: args[1],
+        scope: "local",
+        note: "Backend revoke endpoint is not available in this client; local trust is removed.",
+      };
     }
 
     case "delete-all": {
