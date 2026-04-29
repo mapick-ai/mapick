@@ -4,7 +4,7 @@
 const fs = require("fs");
 const path = require("path");
 const os = require("os");
-const { execSync } = require("child_process");
+const { execFileSync } = require("child_process");
 
 // __dirname is mapick/scripts/lib; CONFIG_DIR should be mapick/.
 const CONFIG_DIR = path.dirname(path.dirname(__dirname));
@@ -194,9 +194,10 @@ function redact(text) {
   if (config.redact_disabled === "true") return text;
   if (!fs.existsSync(REDACTJS_PATH)) return text;
   try {
-    const result = execSync(`node "${REDACTJS_PATH}"`, {
+    const result = execFileSync(process.execPath, [REDACTJS_PATH], {
       input: text,
       encoding: "utf8",
+      maxBuffer: 8 * 1024 * 1024,
       timeout: 5000,
     });
     return result.trim();
