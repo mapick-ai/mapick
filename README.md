@@ -16,7 +16,7 @@
 
 <p align="center">
   <a href="https://mapick.ai">Website</a> &nbsp;|&nbsp;
-  <a href="https://discord.gg/ju8rzvtm5">Discord</a> &nbsp;|&nbsp;
+  <a href="https://discord.gg/gt55CgFZU5">Discord</a> &nbsp;|&nbsp;
   <a href="#install">Install</a> &nbsp;|&nbsp;
   <a href="#commands">Commands</a> &nbsp;|&nbsp;
 </p>
