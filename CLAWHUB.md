@@ -1,7 +1,7 @@
 # Mapick
 
 The Skill manager for OpenClaw. Recommends what you're missing, cleans
-what you don't use, blocks what's unsafe — without ever reading your
+what you don't use, blocks what's unsafe — without reading your project
 code or chat history.
 
 ```
@@ -21,11 +21,27 @@ After install, talk to your agent in any language. Mapick auto-detects intent.
 
 ## Privacy at a glance
 
-Mapick defaults to data-sharing **on**. Default install starts working immediately — no agreement gate.
+Mapick defaults to data-sharing **on**. Default install starts working immediately — no agreement gate, no first-use consent prompt.
+
+This is a **deliberate trade-off**, not an oversight. Mapick is the only
+OpenClaw Skill that needs telemetry to do its core job (recommendations
+based on what you have installed). A first-install consent gate has
+been the single biggest UX drop-off point in past versions; users hit
+"recommend" the second they install and bounce when they hit a wall.
+
+**If you prefer opt-in**: run `node scripts/shell.js privacy consent-decline`
+right after install. All remote commands then refuse client-side until
+you run `consent-agree` to enable.
 
 **Sent**: anonymous device fingerprint (16-char hash of `hostname|os|home`) + Skill IDs you act on + timestamps.
 
-**Never sent**: chat content, arbitrary local file contents, API tokens, credentials, Skill source, environment variables. Persona sharing uploads only Mapick-generated `/tmp/mapick-report-<id>.html` after fail-closed redaction.
+**Never sent**: chat content, arbitrary local file contents, API tokens, credentials, Skill source, environment variables.
+
+**One thing that does upload to api.mapick.ai**: persona-share. When you ask
+Mapick to "share my persona", it uploads a Mapick-generated
+`/tmp/mapick-report-<id>.html` after fail-closed redaction. This is the
+only path where an HTML payload (rather than just identifiers) leaves
+your machine. Refuses upload if redaction is unavailable or disabled.
 
 Three opt-outs, one command each:
 
@@ -38,8 +54,9 @@ Three opt-outs, one command each:
 | Permission | Scope (declared in SKILL.md frontmatter, enforced in code) |
 | --- | --- |
 | Network | `api.mapick.ai` only — endpoint allowlist refuses any other URL |
-| File read | `~/.openclaw/skills/`,`~/.openclaw/workspace/skills/` — scans installed Skills' SKILL.md |
-| File write | `~/.openclawworkspace//skills/mapick/CONFIG.md`, `trash/`, `~/.mapick/cache/`, `~/.mapick/logs/` |
+| File read | `~/.openclaw/skills/` and `~/.openclaw/workspace/skills/` — scans every installed Skill's `SKILL.md` frontmatter to know what's there |
+| File write | `~/.openclaw/workspace/skills/mapick/CONFIG.md`, `~/.openclaw/skills/mapick/trash/`, `~/.mapick/cache/`, `~/.mapick/logs/` |
+| File copy on uninstall | When **you** run `uninstall <skillId> --confirm`, Mapick copies that one Skill's directory (the one being removed) into `trash/` so you can restore within 7 days. This is `fs.cpSync` on the Skill being removed — not on other Skills, not on your project files. |
 | Runtime | Node.js only. Network uses built-in `fetch`; redaction runs in-process; no subprocess execution is required. |
 
 ## Trust signals
@@ -67,15 +84,28 @@ Three opt-outs, one command each:
 ## Requirements
 
 - OpenClaw runtime with **Node.js 22.14+** (24 recommended; the OpenClaw runtime baseline)
+
 No `jq`, no Mapick account, no separate Node install — OpenClaw provides the runtime.
 
 ## First conversation after install
 
 The first message you send triggers `init` automatically. You'll see:
 
-1. A quick scan of what you have installed
-2. A summary card with what Mapick collected + 1-line privacy disclosure
+1. A quick scan of what you have installed (local — no network)
+2. A summary card with what Mapick found + 1-line privacy disclosure
 3. One specific CTA — typically `clean` (if you have zombies) or `recommend` (if not)
+
+**Heads-up**: the auto-init flow makes **one** call to
+`api.mapick.ai/assistant/status` to enrich the summary card with
+`top_used` skills + per-grade safety counts. This is the first remote
+call Mapick makes on your behalf, before you've typed any explicit
+command. The body is your `device_fp`; nothing else.
+
+If you want zero remote calls until **you** explicitly ask: run
+`node scripts/shell.js privacy consent-decline` immediately after
+install — before your first conversation. All remote commands then
+refuse client-side. Re-enable any time with
+`node scripts/shell.js privacy consent-agree`.
 
 No banner, no signup prompt, no consent gate.
 
