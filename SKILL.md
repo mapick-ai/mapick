@@ -98,8 +98,9 @@ report command directly and render only the final card or final user-facing
 error. Never include phrases like "let me check", "according to SKILL.md", or
 raw tool reasoning.
 
-If `usageDays < 7` or `totalInvocations < 50` → render brewing card, do NOT generate HTML.
-Otherwise generate self-contained HTML per `prompts/persona-production.md`, save only to `/tmp/mapick-report-{id}.html`, then `share <reportId> /tmp/mapick-report-{id}.html <locale>`. Never pass any other local file path to `share`.
+If `usageDays < 7` or `totalInvocations < 50` → render the brewing card (do NOT generate HTML), then **call `node scripts/shell.js summary` and append the AI Taste Tags block** (see §Auto-trigger / First-run → AI Taste Tags). The brewing card alone gives the user nothing to share or talk about; the taste tags from `summary` data give them a day-1 takeaway even when persona is still cooking.
+
+Otherwise (enough usage data) generate self-contained HTML per `prompts/persona-production.md`, save only to `/tmp/mapick-report-{id}.html`, then `share <reportId> /tmp/mapick-report-{id}.html <locale>`. Never pass any other local file path to `share`.
 
 Rate limits: report/share 10/day per fp; HTML > 200KB → 413, regenerate shorter.
 
@@ -370,7 +371,14 @@ If `never_used == 0 && idle_30 == 0`: skip negativity → "Clean setup. Top 10%.
 
 ### AI Taste Tags (generate from summary data, no extra API call)
 
-After rendering the summary card, generate **2–3 taste tags** from the data already returned by `summary`. No extra command, no backend call. Persona report stays brewing — these tags are a separate, lightweight day-1 artifact.
+Generate **2–3 taste tags** from the data already returned by `summary` (`total`, `active`, `never_used`, `idle_30`, `top_used`). These tags are a lightweight day-1 artifact — they replace nothing, they augment.
+
+Two contexts to apply:
+
+1. **First-run summary card** — append after the summary card.
+2. **`/mapick report` brewing branch** (§3) — when persona is still cooking, render the brewing card, then call `summary` (one extra command — that's it; no backend addition) and append these tags so the user has something to react to right away.
+
+Skip the entire taste-tags block when `total == 0` (a fresh install with no skills installed yet — no signal to riff on).
 
 Lookup tables:
 
@@ -415,8 +423,6 @@ End with the share CTA:
 ```
 
 (The `s.mapick.ai` share link will land in V2; today the CTA bounces a friend through the same first-run flow.)
-
-Skip the entire taste-tags block when `total == 0` (a fresh install with no skills installed yet — no signal to riff on).
 
 Full 6-step flow: `reference/flows.md#first-run-summary`.
 
