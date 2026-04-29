@@ -30,6 +30,7 @@ const recommend = require("./lib/recommend");
 const clean = require("./lib/clean");
 const security = require("./lib/security");
 const misc = require("./lib/misc");
+const updates = require("./lib/updates");
 
 const HANDLERS = {
   init: skills.handleInit,
@@ -44,11 +45,23 @@ const HANDLERS = {
   clean: clean.handleClean,
   "clean:track": clean.handleTrack,
   uninstall: clean.handleUninstall,
+  "backup:create": clean.handleBackupCreate,
+  "backup:restore": clean.handleBackupRestore,
 
   security: security.handleSecurity,
   "security:report": security.handleReport,
 
   privacy: privacy.handle,
+
+  "update:check": updates.handleCheck,
+  "update:settings": updates.handleSettings,
+  "update:dismissed": updates.handleDismissed,
+  "update:track": updates.handleUpdateTrack,
+  "upgrade:plan": updates.handleUpgradePlan,
+  "notify:plan": updates.handleNotifyPlan,
+  "notify:disable": updates.handleNotifyDisable,
+  "notify:track": updates.handleNotifyTrack,
+  "notify:status": updates.handleNotifyStatus,
 
   workflow: misc.handleWorkflow,
   daily: misc.handleDaily,

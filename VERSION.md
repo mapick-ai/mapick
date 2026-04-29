@@ -2,6 +2,22 @@
 
 All notable changes to Mapick will be documented in this file.
 
+## Unreleased
+
+### Added
+
+- `update:check` command detects updates for Mapick self + installed Skills + missing daily-notify cron (heuristic: `last_notify_at` empty or > 7 days old).
+- `notify:plan` / `notify:disable` / `notify:status` / `notify:track` — return cron setup/teardown plans for the AI to execute. Mapick code performs zero subprocess.
+- `upgrade:plan <id>` — returns install plan for `mapick` or any installed Skill. Skill upgrades include a Mapick-side `backup:create` step before the AI runs `openclaw skills install`.
+- `update:settings off|on` — disable / enable detection.
+- `update:dismissed <id> [version]` — silence prompts for 14 days (notify_setup) or 7 days (per skill version).
+- `update:track` — AI reports install/upgrade outcome, Mapick logs to `~/.mapick/logs/install.jsonl`.
+- `backup:create` / `backup:restore` — explicit backup commands (reuse existing `trash/` mechanism).
+- `/skills/check-updates` added to outbound endpoint allowlist (best-effort: backend may not have implemented yet — fails silent).
+- SKILL.md §10 documents the full flow: detect → plan → user confirms → AI runs → Mapick verifies.
+- `/mapick notify` now writes `last_notify_at` so update:check can detect stale cron.
+- CLAWHUB.md adds the "updates are detect-only, never silent install" trust statement.
+
 ## v0.0.15 - 2026-04-29
 
 ### Changed

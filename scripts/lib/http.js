@@ -56,6 +56,7 @@ const ALLOWED_ENDPOINTS = [
   /^\/assistant\/(status|workflow|daily-digest|weekly)\/[a-f0-9]{16}$/,
   /^\/recommendations\/(feed|track)$/,
   /^\/skills\/live-search$/,
+  /^\/skills\/check-updates$/,
   /^\/users\/[a-f0-9]{16}\/(zombies|profile-text)$/,
   /^\/users\/(trusted-skills|data|consent)$/,
   /^\/events\/track$/,
