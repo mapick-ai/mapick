@@ -206,6 +206,102 @@ Templates: `reference/rendering.md#notify-silence-first`.
 
 ---
 
+## 10. Updates & Notify Setup
+
+### Intent: check / set up reminders / upgrade
+Triggers: any update?, what's outdated, check updates, set up daily reminders, notify me when updates, 帮我装 notify, 升级 mapick, 把可升级的都升级, 关闭更新提醒.
+
+Mapick **detects** but **never** auto-installs/auto-upgrades. All install / upgrade / cron-setup actions return a `*:plan` JSON for the AI to render and ask the user "确认 / cancel?" before running. The AI runs the actual command via its bash tool — Mapick itself has zero subprocess execution.
+
+### Detect
+
+Command: `node scripts/shell.js update:check`
+
+Returns `{intent: "update:check", items: [...]}`. Each item is one update opportunity:
+- `mapick_self` — Mapick has a newer version
+- `skill` — an installed Skill has a newer version (requires `/skills/check-updates` backend; fails silently if unavailable)
+- `notify_missing` — daily-notify cron not running (heuristic: `last_notify_at` empty or > 7 days old)
+
+`settings.update_mode: "off"` returns empty items + an explainer message. Same when `consent_declined`.
+
+### Render `update:check`
+
+If `items: []` and no `message`: reply "Everything's up to date." If `items: []` with `message`: render the message verbatim. Otherwise:
+
+```
+Found <N> things:
+
+- Mapick v0.0.15 → v0.0.17. "upgrade mapick"
+- github-ops v1.2.0 → v1.3.0. "upgrade github-ops"
+- Daily reminders not set up. "set up daily reminders"
+
+Reply with what you want, or "skip" / "暂时不要".
+```
+
+NEVER show raw JSON. NEVER auto-execute.
+
+### Natural-language authorization
+
+Match user reply to `items[].next.trigger_phrases` OR semantic equivalent (any language). On match, run the item's `next.command` (which returns a `*:plan`).
+
+| User says | Run |
+| --- | --- |
+| "upgrade mapick" / "升级 mapick" | `node scripts/shell.js upgrade:plan mapick` |
+| "upgrade <skillId>" | `node scripts/shell.js upgrade:plan <skillId>` |
+| "set up daily reminders" / "开通知" | `node scripts/shell.js notify:plan` |
+| "install all" / "全装" | run each item's `next.command` in turn |
+| "skip" / "暂时不要" | run `node scripts/shell.js update:dismissed <id>` for each item, reply "ok" |
+
+For `upgrade:plan <id>` to work, `<id>` should be `mapick` or any installed Skill ID.
+
+### Render `*:plan`
+
+When shell returns `{intent: "*:plan", commands, what_it_does, what_it_doesnt, stops}`:
+
+Each entry in `commands[]` has a `kind` field (default `"command"` if absent):
+- `kind: "command"` — render the literal `command` string in the plan box.
+- `kind: "instruction"` — render the `instruction` text as a paraphrase prefixed with "AI step:".
+
+```
+I'll run:
+
+  $ <commands[0].command>           ← if kind: "command"
+  AI step: <commands[1].instruction>  ← if kind: "instruction"
+  $ <commands[2].command>
+
+What it does: <what_it_does>
+What it doesn't: <what_it_doesnt>
+To stop later: <stops>
+
+Confirm? Reply "确认" / "yes" to proceed, or "取消" to abort.
+```
+
+NEVER auto-confirm. NEVER omit the `what_it_doesnt` line.
+
+### After user confirms
+
+1. For each step in `commands`:
+   - `kind: "command"` AND `executes_in_mapick: true` → run via `node scripts/shell.js <subcommand>`.
+   - `kind: "command"` (default) → run the literal `command` via your bash tool.
+   - `kind: "instruction"` → execute the multi-step instruction in `instruction` text. Typically this means: run a list/inspect command, parse its output, then run zero-or-more derived commands. Capture each derived command's outcome.
+   - Capture exit code + last 200 chars of stderr per command.
+2. On any failure: stop. If `after_failure_rollback`, run it. Tell user the exact failure (translate stderr).
+3. On full success: run `after_success_track`. Reply with one-line confirmation.
+
+### Settings
+
+- `node scripts/shell.js update:settings off` — disable detection entirely.
+- `node scripts/shell.js update:settings on` — default. Detect + tell user when there are items.
+- `node scripts/shell.js notify:status` — show last notify activity + dismissal expiry.
+
+Dismissal:
+- `update:dismissed notify_setup` — silent on cron-setup prompt for **14 days**.
+- `update:dismissed <skillId> [version]` — silent on that skill upgrade for **7 days**.
+
+Mapick **does not install, upgrade, remove, or modify other Skills unless you explicitly confirm the action.** All install/upgrade actions show a plan before execution; rollback is supported via `backup:restore`.
+
+---
+
 ## Auto-trigger / First-run
 
 On new Mapick session, run `node scripts/shell.js init` (idempotent, 30-min cooldown). Detail: `reference/lifecycle.md#auto-trigger-on-new-conversation`.

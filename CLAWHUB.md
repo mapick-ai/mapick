@@ -80,6 +80,14 @@ Three opt-outs, one command each:
 - **Skill uninstall** is two-step: `clean` only lists; `uninstall <id>`
   requires `--confirm`, refuses protected Skills (mapick / tasa), backs
   up to `trash/` first, auto-cleans backups older than 7 days.
+- **Updates are detect-only** — Mapick checks for new versions of itself
+  and your installed Skills, but **never installs, upgrades, removes, or
+  modifies other Skills unless you explicitly confirm**. Every install /
+  upgrade action surfaces a plan first (commands + what-it-does +
+  what-it-doesn't + how-to-stop), and the AI runs it via its bash tool
+  only after you reply "confirm". Mapick itself has zero subprocess
+  execution. Disable detection entirely with
+  `node scripts/shell.js update:settings off`.
 
 ## Requirements
 

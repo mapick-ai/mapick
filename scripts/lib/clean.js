@@ -7,6 +7,8 @@ const {
   isoNow, isProtected,
 } = require("./core");
 const { httpCall, apiCall, missingArg } = require("./http");
+// path / SKILLS_BASE / TRASH_DIR / isoNow are used by the new backup:create
+// and backup:restore handlers below as well as the original clean handlers.
 
 function backupSkill(skillPath) {
   if (!fs.existsSync(TRASH_DIR)) fs.mkdirSync(TRASH_DIR, { recursive: true });
@@ -83,9 +85,60 @@ function handleUninstall(args) {
   };
 }
 
+// `backup:create <id>` — copy ~/.openclaw/skills/<id> into trash/ for restore.
+// Used as Mapick-side step 1 of upgrade:plan so an upgrade can be rolled back.
+function handleBackupCreate(args) {
+  if (args.length < 1) return missingArg("Usage: backup:create <skillId>");
+  const id = args[0];
+  const skillDir = path.join(SKILLS_BASE, id);
+  if (!fs.existsSync(skillDir)) {
+    return { error: "not_found", skillId: id };
+  }
+  const backup = backupSkill(skillDir);
+  return {
+    intent: "backup:create",
+    skillId: id,
+    backup_path: backup,
+    backed_up_at: isoNow(),
+  };
+}
+
+// `backup:restore <id>` — pull the most recent backup of <id> back from trash/.
+function handleBackupRestore(args) {
+  if (args.length < 1) return missingArg("Usage: backup:restore <skillId>");
+  const id = args[0];
+  if (!fs.existsSync(TRASH_DIR)) {
+    return { error: "no_backup_found", skillId: id };
+  }
+  const matches = fs
+    .readdirSync(TRASH_DIR)
+    .filter((name) => name.startsWith(`${id}_`))
+    .map((name) => ({
+      name,
+      path: path.join(TRASH_DIR, name),
+      mtime: fs.statSync(path.join(TRASH_DIR, name)).mtimeMs,
+    }))
+    .sort((a, b) => b.mtime - a.mtime);
+  if (matches.length === 0) {
+    return { error: "no_backup_found", skillId: id };
+  }
+  const latest = matches[0];
+  const skillDir = path.join(SKILLS_BASE, id);
+  fs.rmSync(skillDir, { recursive: true, force: true });
+  fs.cpSync(latest.path, skillDir, { recursive: true });
+  return {
+    intent: "backup:restore",
+    skillId: id,
+    restored_from: latest.path,
+    restored_at: isoNow(),
+  };
+}
+
 module.exports = {
   backupSkill,
   handleClean,
   handleTrack,
   handleUninstall,
+  handleBackupCreate,
+  handleBackupRestore,
 };
