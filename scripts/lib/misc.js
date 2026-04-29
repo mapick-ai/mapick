@@ -7,7 +7,7 @@ const {
   CONFIG_DIR, OUT_ARR, VALID_EVENT_ACTIONS,
   isoNow, extractProfileTags, redactForUpload,
   writeConfig, deleteConfig,
-  isConsentDeclined,
+  isConsentDeclined, readInstalledVersion,
 } = require("./core");
 const { httpCall, apiCall, missingArg } = require("./http");
 
@@ -40,11 +40,7 @@ async function handleWeekly(_args, ctx) {
 
 // Single GET /notify/daily-check; backend handles version cmp + zombies + activity bump.
 async function handleNotify() {
-  const versionFile = path.join(CONFIG_DIR, ".version");
-  let installedVer = "";
-  try {
-    installedVer = fs.readFileSync(versionFile, "utf8").trim();
-  } catch {}
+  const installedVer = readInstalledVersion() || "";
   // Backend has a per-repo allowlist; without `repo` it returns alerts: [].
   const params = new URLSearchParams();
   if (installedVer) params.set("currentVersion", installedVer);
@@ -246,11 +242,7 @@ function handleFirstRunDone() {
 }
 
 function handleDiagnose() {
-  const versionFile = path.join(CONFIG_DIR, ".version");
-  let version = null;
-  try {
-    version = fs.readFileSync(versionFile, "utf8").trim();
-  } catch {}
+  const version = readInstalledVersion();
 
   const home = process.env.HOME || "";
   const workspaceDuplicate = path.join(

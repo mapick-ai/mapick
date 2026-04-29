@@ -7,10 +7,10 @@
 const fs = require("fs");
 const path = require("path");
 const {
-  CONFIG_DIR, OUT_ARR, SKILLS_BASE,
+  CONFIG_DIR, OUT_ARR, SKILLS_BASE, PROTECTED_SKILLS,
   isoNow, parseFrontmatter,
   readConfig, writeConfig, deleteConfig,
-  isConsentDeclined,
+  isConsentDeclined, readInstalledVersion,
 } = require("./core");
 const { httpCall, missingArg } = require("./http");
 
@@ -64,19 +64,14 @@ function isDismissedActive(map, id, version) {
   return daysSince(iso) < SKILL_DISMISSED_DAYS;
 }
 
-function readInstalledVersion() {
-  const versionFile = path.join(CONFIG_DIR, ".version");
-  try {
-    return fs.readFileSync(versionFile, "utf8").trim();
-  } catch {
-    return null;
-  }
-}
-
+// 扫描 ~/.openclaw/skills/* 用于 /skills/check-updates 批查询。
+// 跳过 PROTECTED_SKILLS（mapick / tasa 自身）—— mapick 走 mapick_self
+// 检测，没有理由再放进 skill 类别让后端落 missing[]。
 function scanInstalledSkills() {
   const out = [];
   if (!fs.existsSync(SKILLS_BASE)) return out;
   for (const dir of fs.readdirSync(SKILLS_BASE)) {
+    if (PROTECTED_SKILLS.includes(dir.toLowerCase())) continue;
     const skillFile = path.join(SKILLS_BASE, dir, "SKILL.md");
     if (!fs.existsSync(skillFile)) continue;
     try {
@@ -207,6 +202,19 @@ async function handleCheck(_args, ctx) {
   };
 }
 
+// Reusable: instruction step that tells the AI to list+by-id-rm any
+// pre-existing mapick-notify cron entries. `openclaw cron rm <name>`
+// silently no-ops (returns ok:true, removed:false) — only by-ID removal
+// actually works. Without this step, every plan run accumulates a new
+// duplicate entry.
+const RM_BY_ID_INSTRUCTION = {
+  kind: "instruction",
+  instruction:
+    "Run `openclaw cron list --json`. Parse the JSON. For EACH entry whose `name` is `mapick-notify`, run `openclaw cron rm <id>` (using the entry's `id` field). This MUST be by ID — `openclaw cron rm mapick-notify` (by name) silently no-ops. If there are no matching entries, do nothing and continue.",
+  rationale:
+    "Idempotent: removes any pre-existing mapick-notify entries before adding a fresh one, so re-running the plan does not accumulate duplicates.",
+};
+
 // `notify:plan` — return the cron-registration plan for AI to execute.
 function handleNotifyPlan() {
   return {
@@ -214,14 +222,10 @@ function handleNotifyPlan() {
     target: "mapick-notify",
     purpose: "Daily 9am check for version updates + zombie skills",
     commands: [
-      {
-        step: 1,
-        command: "openclaw cron rm mapick-notify",
-        optional: true,
-        rationale: "Remove any existing entry first (idempotent; ignore exit code)",
-      },
+      { step: 1, optional: true, ...RM_BY_ID_INSTRUCTION },
       {
         step: 2,
+        kind: "command",
         command:
           'openclaw cron add --name mapick-notify --cron "0 9 * * *" --session isolated --message "Run /mapick notify" --best-effort-deliver --timeout-seconds 120',
         optional: false,
@@ -233,7 +237,7 @@ function handleNotifyPlan() {
     what_it_doesnt:
       "No data leaves your machine on registration. The cron only schedules a future trigger; it does not itself send anything.",
     stops:
-      "Run `openclaw cron rm mapick-notify` any time. Or run `node scripts/shell.js notify:disable` to get this same command back.",
+      "Run `node scripts/shell.js notify:disable` to get the by-id removal plan.",
     after_success_track: "node scripts/shell.js notify:track setup_complete",
     after_failure_rollback: null,
   };
@@ -245,12 +249,7 @@ function handleNotifyDisable() {
     intent: "notify_disable:plan",
     target: "mapick-notify",
     commands: [
-      {
-        step: 1,
-        command: "openclaw cron rm mapick-notify",
-        optional: false,
-        rationale: "Remove the daily-notify cron",
-      },
+      { step: 1, optional: false, ...RM_BY_ID_INSTRUCTION },
     ],
     what_it_does:
       "Stops Mapick from receiving the 9am daily message. /mapick notify still works manually.",
