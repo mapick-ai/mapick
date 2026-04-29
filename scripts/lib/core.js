@@ -97,7 +97,7 @@ function extractProfileTags(text) {
     .toLowerCase()
     .split(/[\s,，.。、；;:!?！？()（）{}\[\]【】"'`+]+/u)
     .map((t) => t.trim())
-    .filter((t) => t.length >= 2 && !STOPWORDS.has(t));
+    .filter((t) => t.length >= 3 && !STOPWORDS.has(t));
   return [...new Set(words)];
 }
 
