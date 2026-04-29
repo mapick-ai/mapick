@@ -45,7 +45,12 @@ Otherwise render like `recommend` (same score filter, same badges, 3-5 items max
 
 ## privacy:status
 
-Short table: consent version + agreed-at; trusted skills (bullets); redaction engine name. If `consent.declined: true`: "You declined consent. Mapick is in local-only mode." Close with: "Delete everything: ask me to run `privacy delete-all`."
+Short table: mode + remote access + consent version/agreed-at + trusted skills
+(bullets) + redaction engine name.
+
+- If `mode: "default_on"` / `remote_access: "enabled"`: say Mapick is using the default anonymous sharing mode; no account, code, chat content, API tokens, or credentials are uploaded. Mention `/mapick privacy log` and `/mapick privacy consent-decline`.
+- If `consent.declined: true`: "You declined data sharing. Mapick is in local-only mode." Close with: "Resume: `/mapick privacy consent-agree`."
+- Always close destructive deletion separately: "Delete everything: ask me to run `privacy delete-all`."
 
 ## privacy:delete-all
 

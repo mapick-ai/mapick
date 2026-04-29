@@ -8,7 +8,7 @@
 | `protected_skill` | Tried to uninstall mapick | Refuse |
 | `service_unreachable` | Backend down | Suggest retry |
 | `disabled_in_local_mode` | Consent declined | Show opt-in |
-| `consent_required` | First install | Run consent flow |
+| `consent_required` | Backend still requires consent unexpectedly | Surface backend message/hint; do not auto-consent |
 
 ## Security Red Lines (MANDATORY)
 

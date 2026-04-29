@@ -26,7 +26,7 @@
 **The AI skill manager for OpenClaw.** Protects your privacy, recommends what you need, cleans what you don't use, and blocks what's unsafe.
 
 ```
-clawhub install mapick
+openclaw skills install mapick
 ``` 
 
  > No setup needed. Just talk to your agent after installing.
@@ -84,7 +84,7 @@ Mapick adds a privacy layer, finds the skills you actually need, and cleans out 
 ## Install
 
 ```bash
-clawhub install mapick
+openclaw skills install mapick
 ```
 <!-- ## <a name="install"></a>Install -->
 
@@ -108,7 +108,10 @@ bash install.sh
 Pin a specific version:
 
 ```bash
-MAPICK_VERSION=v0.0.9 bash -c "$(curl -fsSL https://raw.githubusercontent.com/mapick-ai/mapick/main/install.sh)"
+curl -fsSL https://raw.githubusercontent.com/mapick-ai/mapick/main/install.sh -o install.sh
+less install.sh
+MAPICK_VERSION=v0.0.9 bash install.sh
+
 ```
 
 Then just talk to your agent in any language:

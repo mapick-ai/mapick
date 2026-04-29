@@ -36,15 +36,17 @@ async function handle(args, ctx) {
     case "status":
       return {
         intent: "privacy:status",
+        mode:
+          config.consent_declined === "true"
+            ? "local_only"
+            : "default_on",
         consent_version: config.consent_version || null,
         consent_agreed_at: config.consent_agreed_at || null,
         consent_declined: config.consent_declined === "true",
         remote_access:
           config.consent_declined === "true"
             ? "local_only"
-            : config.consent_version
-              ? "enabled"
-              : "consent_required",
+            : "enabled",
         trusted_skills: config.trusted_skills
           ? config.trusted_skills.split(",")
           : [],

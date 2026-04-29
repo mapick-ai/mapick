@@ -61,6 +61,8 @@ const HANDLERS = {
   "event:track": misc.handleEvent,
   profile: misc.handleProfile,
   "first-run-done": misc.handleFirstRunDone,
+  diagnose: misc.handleDiagnose,
+  version: misc.handleDiagnose,
   id: misc.handleId,
   help: misc.handleHelp,
   "--help": misc.handleHelp,

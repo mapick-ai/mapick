@@ -2,7 +2,9 @@
 
 ## Persona report
 
-1. `report` → returns primaryPersona + shadowPersona + dataProfile (English).
+1. Call `report` directly. Do **not** narrate tool selection, reference loading,
+   or internal checks to the user. The user should see only the final card or
+   final user-facing error.
 2. **If `primaryPersona.id === "fresh_meat"` OR `dataProfile.usageDays < 7` OR `dataProfile.totalInvocations < 50`** — render the brewing card, NOT a zeroed report:
    ```
    🔒 Your persona is brewing...
