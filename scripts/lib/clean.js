@@ -4,9 +4,10 @@ const fs = require("fs");
 const path = require("path");
 const {
   OUT_ARR, SKILLS_BASE, TRASH_DIR,
-  isoNow, isProtected,
+  isoNow, isProtected, isConsentDeclined,
 } = require("./core");
 const { httpCall, apiCall, missingArg } = require("./http");
+const { scanSkills } = require("./skills");
 
 function backupSkill(skillPath) {
   if (!fs.existsSync(TRASH_DIR)) fs.mkdirSync(TRASH_DIR, { recursive: true });
@@ -29,16 +30,53 @@ function backupSkill(skillPath) {
   return backupPath;
 }
 
+// Local heuristic: a zombie is any installed skill whose SKILL.md hasn't
+// been touched in MAPICK_ZOMBIE_DAYS days (default 30). Backend has richer
+// signal (actual invoke counts) but the mtime heuristic is still useful for
+// declined users and when the backend is offline.
+function localZombies() {
+  const zombieDays = parseInt(process.env.MAPICK_ZOMBIE_DAYS || "30", 10);
+  const cutoff = Date.now() - zombieDays * 86_400_000;
+  return scanSkills()
+    .filter((s) => !isProtected(s.id))
+    .filter((s) => new Date(s.last_modified).getTime() < cutoff)
+    .slice(0, OUT_ARR)
+    .map((s) => ({
+      skillId: s.id,
+      skillName: s.name,
+      lastUsedAt: s.last_modified,
+      installedAt: s.installed_at,
+      reason: "idle_30d",
+    }));
+}
+
 async function handleClean(_args, ctx) {
+  // Declined users skip the backend entirely — local-only by design.
+  if (isConsentDeclined(ctx.config)) {
+    return {
+      intent: "clean",
+      local_heuristic: true,
+      reason: "consent_declined",
+      zombies: localZombies(),
+    };
+  }
+
   const cleanResp = await httpCall(
     "GET",
     `/users/${ctx.fp}/zombies?limit=${OUT_ARR}`,
   );
-  // The previous shape `cleanResp.zombies || cleanResp || []` let backend
-  // error objects ({error, statusCode}) leak through as the zombies array
-  // because `error` is truthy. Pass errors through explicitly; otherwise
-  // accept either a top-level array or {zombies: [...]} shape.
-  if (cleanResp && cleanResp.error) return cleanResp;
+  // Network / 5xx from backend → fall back to local heuristic instead of
+  // surfacing an error. Pre-existing behavior leaked the error object as
+  // the zombies array (it's truthy).
+  if (cleanResp && cleanResp.error) {
+    return {
+      intent: "clean",
+      local_heuristic: true,
+      reason: "backend_unreachable",
+      backend_error: cleanResp.error,
+      zombies: localZombies(),
+    };
+  }
   return {
     intent: "clean",
     zombies: Array.isArray(cleanResp) ? cleanResp : (cleanResp?.zombies || []),
