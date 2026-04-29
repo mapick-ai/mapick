@@ -2,6 +2,12 @@
 
 All notable changes to Mapick will be documented in this file.
 
+## v0.0.11 - 2026-04-29
+
+### Changed
+
+- Parameterize subprocess calls to reduce shell-injection scan risk
+
 ## v0.0.10 - 2026-04-29
 
 ### Changed
