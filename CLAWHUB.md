@@ -30,8 +30,10 @@ been the single biggest UX drop-off point in past versions; users hit
 "recommend" the second they install and bounce when they hit a wall.
 
 **If you prefer opt-in**: run `node scripts/shell.js privacy consent-decline`
-right after install. All remote commands then refuse client-side until
-you run `consent-agree` to enable.
+right after install. Local `status`, `scan`, `clean`, `uninstall`, and
+privacy utilities keep working; remote recommendations, search, security,
+reports, bundles, and share refuse client-side until you run
+`consent-agree` to enable.
 
 **Sent**: anonymous device fingerprint (16-char hash of `hostname|os|home`) + Skill IDs you act on + timestamps.
 
@@ -111,8 +113,8 @@ command. The body is your `device_fp`; nothing else.
 
 If you want zero remote calls until **you** explicitly ask: run
 `node scripts/shell.js privacy consent-decline` immediately after
-install — before your first conversation. All remote commands then
-refuse client-side. Re-enable any time with
+install — before your first conversation. Local commands keep working;
+remote commands refuse client-side. Re-enable any time with
 `node scripts/shell.js privacy consent-agree`.
 
 No banner, no signup prompt, no consent gate.

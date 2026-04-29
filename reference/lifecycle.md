@@ -25,7 +25,7 @@ The first-install summary card includes a one-line disclosure with the actual ou
 
 If the user runs `/mapick privacy consent-decline`:
 - CONFIG.md gets `consent_declined: true`.
-- All remote commands (`recommend` / `search` / `bundle install` / `recommend:track` / `privacy trust` / `report` / `share` / `security` / `clean` / `clean:track` / `notify`) are refused **client-side** with `error: "disabled_in_local_mode"`.
+- Remote commands (`recommend` / `search` / `bundle install` / `recommend:track` / `privacy trust` / `report` / `share` / `security` / `security:report` / `clean:track` / `workflow` / `daily` / `weekly`) are refused **client-side** with `error: "disabled_in_local_mode"`.
 - Local commands (`status` / `scan` / `clean` reading local mtime only / `uninstall` / `privacy status` / `privacy delete-all` / `privacy log`) keep working.
 - `notify` cron is not re-registered on subsequent inits.
 
