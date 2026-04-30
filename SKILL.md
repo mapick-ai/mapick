@@ -635,6 +635,7 @@ User-facing:
 | `/mapick workflow`       | Frequent sequences                                   |
 | `/mapick daily`          | Daily digest                                         |
 | `/mapick weekly`         | Weekly summary                                       |
+| `/mapick stats`          | Global & personal stats (installs, conversions)      |
 | `/mapick radar`          | Daily gap radar (silent when nothing to report)      |
 | `/mapick profile clear`  | Reset workflow profile + retrigger first-run summary |
 | `/mapick diagnose`       | Show loaded version/path and workspace shadow risks  |

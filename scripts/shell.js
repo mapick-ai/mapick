@@ -78,6 +78,7 @@ const HANDLERS = {
   share: misc.handleShare,
   event: misc.handleEvent,
   "event:track": misc.handleEvent,
+  stats: misc.handleStats,
   profile: misc.handleProfile,
   "first-run-done": misc.handleFirstRunDone,
   diagnose: misc.handleDiagnose,

@@ -362,6 +362,7 @@ Skills:   recommend [limit] | recommend:track <recId> <skillId> <action>
           clean | clean:track <skillId>
           uninstall <skillId> [--confirm]
 Reports:  workflow | daily | weekly | notify | report | share <reportId> <html> [locale]
+Stats:    stats
 Radar:    radar | radar:reject <category>
 Bundles:  bundle [id] | bundle install <id> | bundle track-installed <id>
 Security: security <skillId> | security:report <skillId> <reason> <evidence>
@@ -381,8 +382,69 @@ function handleUnknown(_args, ctx) {
   };
 }
 
+async function handleStats() {
+  // P4: Stats & conversion tracking
+  let globalStats = {};
+  try {
+    const resp = await httpCall("GET", "/stats/public", null, "stats");
+    if (!resp.error) globalStats = resp;
+  } catch {}
+
+  // Read local cached events from outbound audit log.
+  let events = [];
+  try {
+    const { readOutboundLog } = require("./audit");
+    events = readOutboundLog();
+  } catch {}
+
+  // Count recommendation conversion events.
+  const recEvents = events.filter((e) => e.intent === "recommend:track" || e.action?.startsWith("rec_"));
+  const shown = recEvents.filter((e) =>
+    (e.action || e.method || "").includes("shown"),
+  ).length;
+  const clicks = recEvents.filter((e) =>
+    (e.action || e.method || "").includes("click"),
+  ).length;
+  const installed = recEvents.filter((e) =>
+    (e.action || e.method || "").includes("installed"),
+  ).length;
+  const conversionRate =
+    shown > 0 ? `${Math.round((installed / shown) * 100)}%` : "—";
+
+  // Fun fact from global stats.
+  const skillsCovered = globalStats.skillsCovered || 0;
+  const dailyInteractions = globalStats.dailyInteractions || 0;
+  const totalInstalls = globalStats.installs || 0;
+  let funFact = "Mapick 已覆盖 " + skillsCovered.toLocaleString() + " 个 skill";
+  if (dailyInteractions > 0) {
+    funFact +=
+      "，每日活跃交互 " + dailyInteractions.toLocaleString() + " 次";
+  }
+  if (totalInstalls > 0) {
+    funFact += "，全球 " + totalInstalls.toLocaleString() + " 次安装";
+  }
+
+  return {
+    intent: "stats",
+    global: {
+      total_installs: totalInstalls,
+      daily_interactions: dailyInteractions,
+      skills_covered: skillsCovered,
+    },
+    local: {
+      events_logged: events.length,
+      rec_shown: shown,
+      rec_clicked: clicks,
+      rec_installed: installed,
+      conversion_rate: conversionRate,
+    },
+    fun_fact: funFact,
+  };
+}
+
 module.exports = {
   handleWorkflow, handleDaily, handleWeekly, handleNotify,
   handleBundle, handleReport, handleShare, handleEvent,
   handleProfile, handleFirstRunDone, handleDiagnose, handleId, handleHelp, handleUnknown,
+  handleStats,
 };
