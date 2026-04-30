@@ -145,7 +145,62 @@ async function aggregateSummary(skills, config) {
   } catch {
     // graceful degrade — local data is still returned
   }
+
+  // Day-1 taste tags: compute from local data so every summary/status/report
+  // response carries shareable identity labels. No backend call needed.
+  summary.taste_tags = computeTasteTags(summary);
+
   return summary;
+}
+
+function computeTasteTags(data) {
+  const { total, active, never_used, top_used } = data;
+  if (!total) return null;
+  const rate = total > 0 ? active / total : 0;
+  const names = (top_used || []).map(s => (s.name || "").toLowerCase()).join(" ");
+
+  const tags = [];
+
+  // Quantity
+  if (total >= 40) tags.push("收藏癖 Collector");
+  else if (total >= 15) tags.push("实用主义 Pragmatist");
+  else if (total >= 5) tags.push("极简主义 Minimalist");
+  else tags.push("刚起步 Newbie");
+
+  // Efficiency
+  if (rate < 0.3) tags.push("囤货不用型 Hoarder");
+  else if (rate < 0.6) tags.push("还在探索 Explorer");
+  else if (rate < 0.9) tags.push("效率选手 Optimizer");
+  else tags.push("断舍离大师 Marie Kondo");
+
+  // Stack
+  if (/github|docker|k8s/.test(names)) tags.push("硬核极客 Hardcore Geek");
+  else if (/summarize|writing|content/.test(names)) tags.push("内容创作者 Creator");
+  else if (/data.analysis|visualization/.test(names)) tags.push("数据控 Data Nerd");
+  else if (/productivity|calendar|email/.test(names)) tags.push("效率狂人 Productivity Freak");
+  else tags.push("杂食动物 Omnivore");
+
+  // Bonus zombie — replaces the weakest tag when strongly differentiating.
+  if (never_used > 5) tags.push("装了不用协会会长 Install-and-Forget Champion");
+
+  // Pick top 3 most differentiating. When bonus tag is present (never_used > 5),
+  // it replaces the Stack tag (index 2) since "装了不用" is a stronger signal
+  // than "杂食动物 Omnivore" for most users.
+  const top3 = tags.length > 3 && tags[tags.length - 1].startsWith("装了不用")
+    ? [tags[0], tags[1], tags[tags.length - 1]]
+    : tags.slice(0, 3);
+
+  // Brag line
+  let fact = "";
+  if (total > 40) fact = "你装的 Skill 数量超过 82% 的用户";
+  else if (total > 20) fact = "你装的 Skill 数量超过 60% 的用户";
+  else if (total > 10) fact = "你装的 Skill 数量超过 40% 的用户";
+
+  return {
+    tags: top3,
+    fact,
+    cta: "📤 测测你朋友的 → /mapick status",
+  };
 }
 
 async function handleInit(_args, ctx) {
@@ -161,13 +216,30 @@ async function handleInit(_args, ctx) {
   const skills = scanSkills();
   if (!ctx.config.device_fp) {
     writeConfig("created_at", isoNow());
+    writeConfig("first_welcome_shown", "true");
     return {
       status: "first_install",
+      welcome: true,
       data: {
         skillsCount: skills.length,
         skillNames: skills.slice(0, 5).map((s) => s.name),
       },
       privacy: "Anonymous by design. No registration.",
+      taste_tags: computeTasteTags({ total: skills.length, active: skills.length, never_used: 0, top_used: [] }),
+    };
+  }
+
+  // First welcome card — shown once, then never again
+  if (!ctx.config.first_welcome_shown) {
+    writeConfig("first_welcome_shown", "true");
+    const summary = await aggregateSummary(skills, ctx.config);
+    return {
+      intent: "status",
+      welcome: true,
+      skills,
+      activation_rate: summary.activation_rate,
+      zombie_count: summary.zombie_count,
+      taste_tags: summary.taste_tags,
     };
   }
   const zombieDays = parseInt(process.env.MAPICK_ZOMBIE_DAYS || "30", 10);
@@ -201,6 +273,21 @@ async function handleStatus(_args, ctx) {
   const skills = scanSkills();
   const fresh = readConfig();
   fresh.device_fp = fresh.device_fp || ctx.fp;
+
+  // Welcome card — trigger once if never shown
+  if (!fresh.first_welcome_shown && fresh.device_fp) {
+    writeConfig("first_welcome_shown", "true");
+    const summary = await aggregateSummary(skills, fresh);
+    return {
+      intent: "status",
+      welcome: true,
+      skills,
+      activation_rate: summary.activation_rate,
+      zombie_count: summary.zombie_count,
+      taste_tags: summary.taste_tags,
+    };
+  }
+
   return aggregateSummary(skills, fresh);
 }
 
@@ -221,6 +308,7 @@ module.exports = {
   countRedactRules,
   registerNotifyCron,
   aggregateSummary,
+  computeTasteTags,
   handleInit,
   handleStatus,
   handleScan,

@@ -1,7 +1,7 @@
 ---
 name: mapick
 description: Mapick — Skill recommendation & privacy protection for OpenClaw. Scans your local skills, suggests what you're missing, and keeps other skills from seeing your sensitive data.
-metadata: { "openclaw": { "emoji": "🔍", "requires": { "bins": ["node"], "node": ">=22.14" }, "permissions": { "network": ["api.mapick.ai"], "file_read": ["~/.openclaw/skills/","~/.openclaw/workspace/skills/","~/.mapick/logs/","~/.mapick/cache/","/tmp/mapick-report-"], "file_write": ["~/.openclaw/skills/","~/.openclaw/workspace/skills/","~/.mapick/","/tmp/mapick-report-"] } } }
+metadata: { "openclaw": { "emoji": "🔍", "requires": { "bins": ["node"], "node": ">=22.14" }, "permissions": { "network": ["api.mapick.ai","127.0.0.1:3010"], "file_read": ["~/.openclaw/skills/","~/.openclaw/workspace/skills/","~/.mapick/logs/","~/.mapick/cache/","/tmp/mapick-report-"], "file_write": ["~/.openclaw/skills/","~/.openclaw/workspace/skills/","~/.mapick/","/tmp/mapick-report-"] } } }
 ---
 
 # Mapick
@@ -101,9 +101,11 @@ raw tool reasoning.
 
 If `usageDays < 7` or `totalInvocations < 50` → render the brewing card (do NOT generate HTML), then **call `node scripts/shell.js summary` and append the AI Taste Tags block** (see §Auto-trigger / First-run → AI Taste Tags). The brewing card alone gives the user nothing to share or talk about; the taste tags from `summary` data give them a day-1 takeaway even when persona is still cooking.
 
+If the `report` response contains `fallback: "local_day1_summary"` or `day1_summary` / `taste_tags`, render those tags immediately. This is the backend-rate-limit / backend-unavailable fallback path: do not stop at the error message, and do not generate HTML. Tell the user the full persona is still brewing, then show the local tags and summary.
+
 Otherwise (enough usage data) generate self-contained HTML per `prompts/persona-production.md`, save only to `/tmp/mapick-report-{id}.html`, then `share <reportId> /tmp/mapick-report-{id}.html <locale>`. Never pass any other local file path to `share`.
 
-Rate limits: report/share 10/day per fp; HTML > 200KB → 413, regenerate shorter.
+Rate limits: report daily quota is temporarily disabled; share remains 10/day per fp. HTML > 200KB → 413, regenerate shorter.
 
 Full flow + brewing card template: `reference/flows.md#persona-report`.
 
@@ -145,12 +147,49 @@ Grade A/B/C rendering details: `reference/rendering.md#security`.
 Triggers: status, overview, dashboard, my skills, how am I doing.
 Command: `node scripts/shell.js status`
 
-Lead with verdict (not dashboard). Surface one hidden insight. End with one specific action.
+**If the shell response has `welcome: true` → render the Welcome card below INSTEAD of normal status. Do NOT skip the welcome card, even if the user has sent status before.**
 
-### First install (`status: "first_install"`)
-Greet, mention scan + skillsCount, suggest `/mapick recommend`, include `privacy` line verbatim. No ASCII logo.
+**Welcome card (P0 — mandatory, render exactly as specified):**
 
-Verdict templates + insight rules + first_install template: `reference/rendering.md#status`, `#first_install`.
+```
+🎉 Mapick 已启动
+
+我会帮你：
+• 发现缺失的 skills（本地识别能力缺口，不上传聊天内容）
+• 检查隐私设置和清理闲置 skills
+• 需要联网时只发送：匿名设备 ID + skill 列表 + 搜索关键词
+
+🎯 你的 AI 品味：「{taste_tags.tags[0]} + {taste_tags.tags[1]} + {taste_tags.tags[2]}」
+{taste_tags.fact}
+{taste_tags.cta}
+
+你可以：
+• 推荐我缺什么 → /mapick recommend
+• 看隐私设置 → /mapick privacy status
+• 关闭主动提醒 → /mapick update:settings off
+```
+
+**Normal status render (welcome already shown):**
+
+Lead with a one-line verdict. Surface one hidden insight. Then ALWAYS render the taste_tags from the shell response:
+```
+🎯 你的 AI 品味：「{taste_tags.tags joined by ' + '}」
+{taste_tags.fact}
+{taste_tags.cta}
+```
+
+The shell response includes a `taste_tags` object. ALWAYS render it after the verdict:
+
+```
+🎯 你的 AI 品味：「{taste_tags.tags joined by ' + '}」
+{taste_tags.fact}
+{taste_tags.cta}
+```
+
+The verdict (1-2 sentences) + the 🎯 block together form a complete /mapick status response. Do NOT output only the verdict.
+
+### First install (`welcome: true`)
+The Welcome card above replaces the old first_install template. Do NOT use the old "first_install" template from rendering.md — always use the Welcome card when `welcome: true`.
 
 ### Intent: diagnose
 Triggers: diagnose, version, loaded path, why old version, shadow, duplicate.
@@ -213,7 +252,15 @@ Command: `node scripts/shell.js uninstall <skillId> --confirm`. Default `--scope
 - **daily**: `node scripts/shell.js daily` — today's digest. Triggers: daily, today, yesterday.
 - **weekly**: `node scripts/shell.js weekly` — week summary. Triggers: weekly, this week, last week.
 
-3-5 bullets max, no decorative emojis or dividers.
+Render `/mapick daily` as a day-1-friendly snapshot, not a dry digest:
+
+1. Start with `📊 今日 Mapick 摘要`.
+2. Summarize `data.yesterday` / `message` in 1-2 lines. If activity is low or zero, say the persona data is still light, then pivot to the local snapshot.
+3. If `day1_summary` and `taste_tags` are present, render an `AI 使用快照` section and append the AI Taste Tags block (§Auto-trigger / First-run → AI Taste Tags). Use the returned `taste_tags` exactly; do not recalculate or invent a different tag. Do not call any extra API.
+4. If `data.top2Recommendations` or `recommendations` are present, show exactly two recommendations under `💡 顺手补两个 Skill`, using the recommend rendering style: one sentence for the gap, one sentence for the fix. Do not show raw scores or JSON.
+5. End with one specific CTA: install one recommendation, run `/mapick clean`, or run `/mapick report` depending on the strongest signal.
+
+Weekly can stay compact: 3-5 bullets max.
 
 ---
 
@@ -223,7 +270,26 @@ Background notify is checked by `/mapick notify`. Automatic cron registration is
 
 On fire/manual run: `node scripts/shell.js notify` → `GET /notify/daily-check?currentVersion=<v>`.
 
-**Silence-first**: `alerts: []` → output absolutely nothing (no acknowledgement). Empty AI output ⇒ no message delivered.
+Exact slash command routing: `/mapick notify` **always** runs `node scripts/shell.js notify`. Do not run `notify:plan` unless the user explicitly asks to set up, install, enable, or configure notifications/reminders.
+
+Manual `/mapick notify`: render a small card even when `alerts: []`:
+
+```
+没有新通知 ✅
+
+检查时间：<checkedAt localized>
+版本更新：无
+僵尸 Skill：无
+其他警报：无
+
+💡 顺手推荐两个 Skill
+1. <skillName> — <why this helps>
+2. <skillName> — <why this helps>
+```
+
+Use `recommendations` from the notify response. Show exactly two if available; if none are available, skip the recommendation section. Keep it short and do not show raw JSON, score, ids, or install commands unless the user asks to install.
+
+Background cron phrasing exactly like `Run /mapick notify`: keep **silence-first** for `alerts: []` to avoid pushing empty daily messages.
 
 `alerts` non-empty → ≤6 lines, friendly tone, version first then zombies.
 
@@ -338,7 +404,15 @@ Mapick **does not install, upgrade, remove, or modify other Skills unless you ex
 
 On new Mapick session, run `node scripts/shell.js init` (idempotent, 30-min cooldown). Detail: `reference/lifecycle.md#auto-trigger-on-new-conversation`.
 
-If CONFIG.md lacks `first_run_complete`: run `node scripts/shell.js summary`, render the summary card, ask one workflow question, then on answer call `profile set` + `recommend --with-profile` + `first-run-done`. Output summary AND question in a SINGLE response.
+**Three scenarios that MUST show taste tags:**
+
+1. **First install** — `init` returns `status: "first_install"`: render per §Intent: status → First install template (includes 🎯 tags as centerpiece).
+2. **Daily / periodic** — `init` returns normal status data: render a compact status line, then **always append 🎯 tags**. Make this feel like a daily fortune cookie.
+3. **Post-upgrade** — if `init` runs after a version bump: same as scenario 2, but add "Mapick 已升级到 v<version>" before the tags.
+
+If CONFIG.md lacks `first_run_complete`: run `node scripts/shell.js summary`, render the summary card WITH taste tags, ask one workflow question, then on answer call `profile set` + `recommend --with-profile` + `first-run-done`. Output summary AND question in a SINGLE response.
+
+**IMPORTANT: Taste tags are MANDATORY in every init/status/summary/first-run render.** Never show just a number dump — the 🎯 line is the only thing users share. Without it, there is zero virality.
 
 ### Rendering: summary card
 
@@ -373,13 +447,24 @@ context window. Every conversation, your agent loads them for nothing.
 
 🔒 Outbound: anonymous device id + skill IDs you act on + timestamps.
    Audit: /mapick privacy log    Decline: /mapick privacy consent-decline
+
+---
+🎯 你的 AI 品味：「{quantity_tag} + {efficiency_tag} + {stack_tag}」
+{brag_line}
+📤 测测你朋友的 → /mapick status
 ```
 
+After rendering the summary card, you MUST generate the AI Taste Tags block (the 🎯 section above). Use the lookup tables under §AI Taste Tags (below) with the `total`, `active`, `never_used`, `top_used` values from the summary data. This block is MANDATORY — never skip it after a summary card, even when total <= 3 or never_used == 0. Only skip when `total == 0`.
+
 If `never_used == 0 && idle_30 == 0`: skip negativity → "Clean setup. Top 10%." If `total <= 3`: skip the zombie angle → "Just getting started — let me find tools that match your workflow." If `has_backend: false`: skip the heavy-hitters + safety-check sections; say "Backend offline; counts only."
+
+**After ANY summary card render (regardless of branch taken above), you MUST always append the AI Taste Tags block.** The tags section uses the same `total`, `active`, `never_used`, `top_used` fields from the summary data. Never omit it — the tags are the shareable takeaway. Only skip when `total == 0`.
 
 ### AI Taste Tags (generate from summary data, no extra API call)
 
 Generate **2–3 taste tags** from the data already returned by `summary` (`total`, `active`, `never_used`, `idle_30`, `top_used`). These tags are a lightweight day-1 artifact — they replace nothing, they augment.
+
+If a command response already includes `taste_tags` and `taste_fact`, render those values exactly and skip recomputing the lookup locally. This prevents arithmetic drift in the model response.
 
 Two contexts to apply:
 

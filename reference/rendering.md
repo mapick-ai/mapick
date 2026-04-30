@@ -83,20 +83,22 @@ When `matched === true`, localize `detailsEn` and apply Display rule (STRICT):
 
 ## status
 
-1. **Lead with a verdict, not a dashboard.** Not "you have 47 skills" but: "You have 47 skills installed but only use 14 of them. Your activation rate is 30% — that puts you in the bottom quarter. Most users who clean up see their agent speed double."
+**Output two blocks. Block 2 is the most important.**
 
-2. **Surface one hidden insight** the user didn't ask for:
-   - `zombie_count > 10`: "Fun fact: you have more dead skills than active ones."
-   - top skill > 10x/day: "You use <skill> more than 95% of users. Have you tried <related-skill>?"
-   - `activation_rate > 80%`: "Top 10%. You only install what you actually use."
-   - All Grade A: "All your skills are Grade A. Clean setup."
+**Block 1 — Verdict (1-2 lines max):**
+1. Lead with a verdict, not a dashboard.
+2. Surface one hidden insight.
+3. End with one specific action.
 
-3. **End with one specific action**, not a menu:
-   - zombies > 5: "Say 'clean up' to reclaim <X>% of your context."
-   - `activation_rate > 70%` and no zombies: "You're in great shape. Try 'analyze me' to see your developer persona."
-   - Otherwise: "Say 'recommend' to find what you're missing."
+**Block 2 — AI Taste Tags (MANDATORY):**
+```
+🎯 你的 AI 品味：「{tag1} + {tag2} + {tag3}」
+{brag_line}
+📤 测测你朋友的 → /mapick status
+```
+Generate tags from the shell response using lookup tables in SKILL.md §AI Taste Tags. Only skip when `total == 0`.
 
-Do NOT show a command list. Answer "how am I doing", then suggest ONE next step.
+Block 1 is context. Block 2 is what users share. Never output only Block 1.
 
 ## first_install
 
@@ -104,16 +106,25 @@ Shell returns:
 ```json
 {
   "status": "first_install",
-  "data": { "deviceFingerprint": "...", "skillsCount": 3, "skillNames": ["tasa", "mapick", "stage"] },
+  "data": { "skillsCount": 3, "skillNames": ["tasa", "mapick", "stage"] },
   "privacy": "Anonymous by design. No registration. ..."
 }
 ```
 
 Render in user's language:
-1. Greet warmly, one sentence. ("Mapick is ready.")
-2. Mention scan + `skillsCount` skills found. If `>0`, list up to 5 from `skillNames`. If `0`, say canvas is empty and offer discovery.
-3. One next step. ("Try `/mapick recommend` to see what might help you.")
-4. Include `privacy` line verbatim (translate literally — substance: anonymous, no registration).
+
+1. Greet warmly, one sentence. ("🎉 Mapick 已就绪！扫描到 <skillsCount> 个 Skill。")
+
+2. **Immediately show AI Taste Tags as the centerpiece.** This is the user's day-1 identity reveal — the moment they go "whoa, I want to share this". Generate tags from the summary data per the lookup tables in SKILL.md §Auto-trigger / First-run → AI Taste Tags:
+   ```
+   🎯 你的 AI 品味：「{tag1} + {tag2} + {tag3}」
+   {brag_line}
+   📤 测测你朋友的 → /mapick status
+   ```
+
+3. One next step: "Try `/mapick recommend` to find your next skill."
+
+4. Include `privacy` line verbatim.
 
 **Do not** render any ASCII logo, prompt for registration, or auto-call follow-up commands.
 

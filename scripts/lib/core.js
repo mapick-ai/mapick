@@ -12,7 +12,10 @@ const SCRIPTS_DIR = path.dirname(__dirname);
 const CONFIG_FILE = path.join(CONFIG_DIR, "CONFIG.md");
 const TRASH_DIR = path.join(CONFIG_DIR, "trash");
 const REDACTJS_PATH = path.join(SCRIPTS_DIR, "redact.js");
-const API_BASE = "https://api.mapick.ai/api/v1";
+// TEMP_LOCAL_API_FOR_TESTING 2026-04-30:
+// Before publishing or pushing remote, restore this to
+// "https://api.mapick.ai/api/v1".
+const API_BASE = "http://127.0.0.1:3010/api/v1";
 const CACHE_DIR = path.join(os.homedir(), ".mapick", "cache");
 
 const OUT_ARR = parseInt(process.env.MAPICK_OUTPUT_ARRAY_LIMIT || "10", 10);
@@ -188,6 +191,29 @@ function readInstalledVersion() {
     const v = fs.readFileSync(versionFile, "utf8").trim();
     if (v) return v;
   } catch {}
+
+  // Local development checkout: no installer-owned .version, but .git exists.
+  // Treat it as a dev build so notify/update checks don't nag that the latest
+  // published release is newer than the code currently being validated.
+  try {
+    const gitPath = path.join(CONFIG_DIR, ".git");
+    let gitDir = gitPath;
+    const gitStat = fs.statSync(gitPath);
+    if (gitStat.isFile()) {
+      const raw = fs.readFileSync(gitPath, "utf8").trim();
+      const m = raw.match(/^gitdir:\s*(.+)$/);
+      if (m) gitDir = path.resolve(CONFIG_DIR, m[1]);
+    }
+    const head = fs.readFileSync(path.join(gitDir, "HEAD"), "utf8").trim();
+    if (/^[0-9a-f]{40}$/i.test(head)) return `local-${head.slice(0, 7)}`;
+    const refMatch = head.match(/^ref:\s*(.+)$/);
+    if (refMatch) {
+      const refFile = path.join(gitDir, refMatch[1]);
+      const sha = fs.readFileSync(refFile, "utf8").trim();
+      if (/^[0-9a-f]{40}$/i.test(sha)) return `local-${sha.slice(0, 7)}`;
+    }
+  } catch {}
+
   // Fallback：解析 VERSION.md 第一个 `## vX.Y.Z` 标题（跳过 `## Unreleased`）。
   // VERSION.md 与 CONFIG_DIR 同级，是项目里唯一权威的版本时间线。
   const versionMd = path.join(CONFIG_DIR, "VERSION.md");

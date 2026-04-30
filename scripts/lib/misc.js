@@ -6,7 +6,7 @@ const path = require("path");
 const {
   CONFIG_DIR, OUT_ARR, VALID_EVENT_ACTIONS,
   isoNow, extractProfileTags, redactForUpload,
-  writeConfig, deleteConfig,
+  readConfig, writeConfig, deleteConfig,
   isConsentDeclined, readInstalledVersion,
 } = require("./core");
 const { httpCall, apiCall, missingArg } = require("./http");
@@ -21,12 +21,13 @@ async function handleWorkflow(_args, ctx) {
 }
 
 async function handleDaily(_args, ctx) {
-  return apiCall(
+  const result = await apiCall(
     "GET",
     `/assistant/daily-digest/${ctx.fp}?compact=1`,
     null,
     "daily",
   );
+  return attachDay1Summary(result, ctx);
 }
 
 async function handleWeekly(_args, ctx) {
@@ -52,8 +53,11 @@ async function handleNotify() {
   params.set("compact", "1");
   params.set("limit", String(OUT_ARR));
   const resp = await httpCall("GET", `/notify/daily-check?${params}`);
+  const recommendations = await fetchRecommendations(2);
   // Silence-first: backend/network failure → empty alerts.
-  if (resp.error) return { intent: "notify", alerts: [], dev_build: isDevBuild };
+  if (resp.error) {
+    return { intent: "notify", alerts: [], dev_build: isDevBuild, recommendations };
+  }
   if (Array.isArray(resp.alerts) && installedVer) {
     const baseVersion = installedVer.split("-")[0];
     resp.alerts = resp.alerts.filter((alert) => {
@@ -66,7 +70,17 @@ async function handleNotify() {
   // Track liveness — used by `update:check` to detect stale notify and prompt
   // the user to (re)set up the cron.
   writeConfig("last_notify_at", isoNow());
-  return { intent: "notify", dev_build: isDevBuild, ...resp };
+  return { intent: "notify", dev_build: isDevBuild, recommendations, ...resp };
+}
+
+async function fetchRecommendations(limit = 2) {
+  try {
+    const resp = await httpCall("GET", `/recommendations/feed?limit=${limit}`);
+    if (resp.error) return [];
+    return (resp.items || resp.recommendations || []).slice(0, limit);
+  } catch {
+    return [];
+  }
 }
 
 async function handleBundle(args, ctx) {
@@ -104,9 +118,54 @@ async function handleBundle(args, ctx) {
   return apiCall("GET", `/bundle?limit=${OUT_ARR}`, null, "bundle");
 }
 
-async function handleReport() {
+async function attachDay1Summary(result, ctx) {
+  try {
+    const { scanSkills, aggregateSummary } = require("./skills");
+    const config = ctx.config || readConfig();
+    const summaryConfig = {
+      ...config,
+      device_fp: config.device_fp || ctx.fp,
+    };
+    const localSummary = await aggregateSummary(scanSkills(), summaryConfig);
+    // aggregateSummary already calls computeTasteTags internally and stores
+    // the result in localSummary.taste_tags — use it directly to avoid
+    // double-computation and type drift (null vs []).
+    const tt = localSummary.taste_tags;
+    result.day1_summary = localSummary;
+    result.taste_tags = tt ? tt.tags : null;
+    result.taste_fact = tt ? tt.fact : null;
+    result.next_action_hint =
+      "Persona data is still brewing, but day-1 summary and taste tags are ready to render.";
+  } catch (err) {
+    result.day1_summary_error = err.message;
+  }
+  return result;
+}
+
+async function handleReport(_args = [], ctx = {}) {
   const reportResp = await httpCall("GET", `/report/persona?compact=1`);
+  if (reportResp.error === "rate_limit") {
+    return attachDay1Summary(
+      {
+        intent: "report",
+        status: "brewing",
+        fallback: "local_day1_summary",
+        messageEn:
+          "Persona data is still brewing, but Mapick can show a local day-1 summary right now.",
+      },
+      ctx,
+    );
+  }
+
   const result = { intent: "report", ...reportResp };
+  if (result.error) {
+    result.status = "brewing";
+    result.fallback = "local_day1_summary";
+    result.messageEn =
+      result.messageEn ||
+      "Persona backend is temporarily unavailable, but Mapick can still show a local day-1 summary.";
+    return attachDay1Summary(result, ctx);
+  }
   if (
     result.status === "brewing" ||
     result.primaryPersona?.id === "fresh_meat"
@@ -115,6 +174,7 @@ async function handleReport() {
     result.messageEn =
       result.messageEn ||
       ":lock: Your persona is brewing. Use Mapick for a few more skill actions before generating a shareable report.";
+    await attachDay1Summary(result, ctx);
   }
   return result;
 }
