@@ -34,6 +34,24 @@ Command: `node scripts/shell.js recommend [limit]` · cached 24h, force refresh 
 Triggers: search, find, look for, anything for X.
 Command: `node scripts/shell.js search <keyword> [limit]`
 
+### Intent: intent (P1 — local gap detection)
+Triggers: user says they want to do something but don't have a skill for it ("I need to scrape data", "can I deploy to k8s", "有没有做代码审查的", "帮我读 PDF"). Also triggered by tool failures / missing capability in the current workflow.
+Command: `node scripts/shell.js intent <natural language description>`
+
+**How it works (privacy-first):**
+1. You detect the gap from the user's natural language.
+2. Call `intent "他们的原话"` — Mapick extracts keywords **locally**.
+3. Only the extracted keywords are sent to the backend for search.
+4. The user's full message never leaves the machine.
+
+**Rendering:**
+- When `items` non-empty: render like `search` results (same gap→fix two-sentence style, same badge rules).
+- Lead with: "基于你说的「{original}」，我提取了关键词「{keywords}」帮你搜了一下" (translate to user's language).
+- When `items` empty or `notice` present: surface the extracted keywords to the user so they can refine. Suggest trying `/mapick recommend` or broadening their description.
+- NEVER show or transmit the raw `original` text — the `original` field in the response is for the AI's rendering context only.
+
+On user pick: **resolve the canonical slug** (see Install command rule below) and run `openclaw skills install <slug>`, then `node scripts/shell.js recommend:track <recId> <skillId> installed`. NEVER pass through raw `installCommands[].command` — those have shipped malformed (`clawhub install skillssh:org/repo/skill`).
+
 On user pick: **resolve the canonical slug** (see Install command rule below) and run `openclaw skills install <slug>`, then `node scripts/shell.js recommend:track <recId> <skillId> installed`. NEVER pass through raw `installCommands[].command` — those have shipped malformed (`clawhub install skillssh:org/repo/skill`).
 
 ### Install command rule (STRICT)
@@ -533,6 +551,7 @@ User-facing:
 | `/mapick clean`          | List zombies, pick which to remove                   |
 | `/mapick recommend`      | Recommendations                                      |
 | `/mapick search <kw>`    | Search skills                                        |
+| `/mapick intent <desc>`  | Natural language → local keywords → search (privacy-first) |
 | `/mapick bundle`         | Browse / install bundles                             |
 | `/mapick security <id>`  | Safety check                                         |
 | `/mapick report`         | Persona report                                       |

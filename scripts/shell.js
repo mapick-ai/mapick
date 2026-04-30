@@ -42,6 +42,7 @@ const HANDLERS = {
   recommend: recommend.handleRecommend,
   "recommend:track": recommend.handleTrack,
   search: recommend.handleSearch,
+  intent: recommend.handleIntent,
 
   clean: clean.handleClean,
   "clean:track": clean.handleTrack,

@@ -358,7 +358,8 @@ function handleHelp() {
 Local:    init | status | scan | summary | id | first-run-done
 Diag:     diagnose | version
 Skills:   recommend [limit] | recommend:track <recId> <skillId> <action>
-          search <query> [limit] | clean | clean:track <skillId>
+          search <query> [limit] | intent <natural language>
+          clean | clean:track <skillId>
           uninstall <skillId> [--confirm]
 Reports:  workflow | daily | weekly | notify | report | share <reportId> <html> [locale]
 Bundles:  bundle [id] | bundle install <id> | bundle track-installed <id>
