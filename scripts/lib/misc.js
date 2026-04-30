@@ -369,8 +369,9 @@ Security: security <skillId> | security:report <skillId> <reason> <evidence>
 Privacy:  privacy {status|trust <id>|untrust <id>|delete-all --confirm
                  |consent-agree [ver]|consent-decline
                  |disable-redact|enable-redact|log [limit]}
-Events:   event:track <action> [skillId]   (always uses local device fp)
-Profile:  profile {set "<text>"|get|clear}`,
+  Events:   event:track <action> [skillId]   (always uses local device fp)
+  Stats:    stats | dashboard
+  Profile:  profile {set "<text>"|get|clear}`,
   };
 }
 
@@ -383,7 +384,6 @@ function handleUnknown(_args, ctx) {
 }
 
 async function handleStats() {
-  // P4: Stats & conversion tracking
   let globalStats = {};
   try {
     const resp = await httpCall("GET", "/stats/public", null, "stats");
@@ -442,9 +442,21 @@ async function handleStats() {
   };
 }
 
+function handleDashboard() {
+  const DASHBOARD_PORT = 3030;
+  const url = `http://127.0.0.1:${DASHBOARD_PORT}/`;
+  return {
+    intent: "dashboard",
+    url,
+    port: DASHBOARD_PORT,
+    hint: `Stats dashboard running at ${url} — open in a browser.`,
+    _open_command: `open ${url}`,
+  };
+}
+
 module.exports = {
   handleWorkflow, handleDaily, handleWeekly, handleNotify,
   handleBundle, handleReport, handleShare, handleEvent,
   handleProfile, handleFirstRunDone, handleDiagnose, handleId, handleHelp, handleUnknown,
-  handleStats,
+  handleStats, handleDashboard,
 };

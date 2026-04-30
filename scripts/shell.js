@@ -79,6 +79,7 @@ const HANDLERS = {
   event: misc.handleEvent,
   "event:track": misc.handleEvent,
   stats: misc.handleStats,
+  dashboard: misc.handleDashboard,
   profile: misc.handleProfile,
   "first-run-done": misc.handleFirstRunDone,
   diagnose: misc.handleDiagnose,
