@@ -1,7 +1,7 @@
 ---
 name: mapick
 description: Mapick — Skill recommendation & privacy protection for OpenClaw. Scans your local skills, suggests what you're missing, and keeps other skills from seeing your sensitive data.
-metadata: { "openclaw": { "emoji": "🔍", "requires": { "bins": ["node"], "node": ">=22.14" }, "permissions": { "network": ["api.mapick.ai"], "file_read": ["~/.openclaw/skills/","~/.openclaw/workspace/skills/"], "file_write": ["~/.openclaw/workspace/skills/mapick/CONFIG.md", "~/.openclaw/skills/mapick/trash/", "~/.mapick/cache/"] } } }
+metadata: { "openclaw": { "emoji": "🔍", "requires": { "bins": ["node"], "node": ">=22.14" }, "permissions": { "network": ["api.mapick.ai"], "file_read": ["~/.openclaw/skills/","~/.openclaw/workspace/skills/","~/.mapick/logs/","~/.mapick/cache/","/tmp/mapick-report-"], "file_write": ["~/.openclaw/skills/","~/.openclaw/workspace/skills/","~/.mapick/","/tmp/mapick-report-"] } } }
 ---
 
 # Mapick
