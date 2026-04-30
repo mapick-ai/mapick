@@ -29,6 +29,7 @@ const skills = require("./lib/skills");
 const recommend = require("./lib/recommend");
 const clean = require("./lib/clean");
 const security = require("./lib/security");
+const radar = require("./lib/radar");
 const misc = require("./lib/misc");
 const updates = require("./lib/updates");
 const doctor = require("./lib/doctor");
@@ -69,6 +70,8 @@ const HANDLERS = {
   daily: misc.handleDaily,
   weekly: misc.handleWeekly,
   notify: misc.handleNotify,
+  radar: radar.handleRadar,
+  "radar:reject": radar.handleRadarReject,
   bundle: misc.handleBundle,
   report: misc.handleReport,
   share: misc.handleShare,

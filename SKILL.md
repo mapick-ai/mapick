@@ -418,6 +418,46 @@ Mapick **does not install, upgrade, remove, or modify other Skills unless you ex
 
 ---
 
+## 11. Radar（机会雷达）(P2)
+
+Daily low-frequency skill gap radar. Runs silently — only speaks when it finds something.
+
+### Intent: radar
+Triggers: `/mapick radar`, triggered once per day by the AI after init.
+Command: `node scripts/shell.js radar`
+
+Returns either:
+- `{ silent: true, reason: "..." }` — absolutely nothing to do. Do not render, do not acknowledge.
+- `{ silent: false, gaps: [...] }` — up to 2 skill gaps with categories.
+
+### Frequency control (automatic)
+- Max 1 run per day (`last_radar_at` cooldown).
+- Same category silent for 7 days.
+- User rejects a category 2 times → category muted for 14 days.
+
+### Rendering: radar (non-silent)
+
+Lead with a single sentence that connects to something the user actually does:
+> 今天发现一个能力缺口：你最近在处理 X/Twitter 数据，但当前只有 xurl，没有通用跨平台抓取。
+
+Then for each gap (max 2), render two sentences like recommend:
+1. The gap — what you're doing without the right tool.
+2. The fix — skill name + safety badge + what manual work disappears.
+
+End with a single CTA:
+> 回复 1 或 2 安装，或 "skip" 暂时不要。
+
+### Tracking rejections
+
+When user says "skip" / "暂时不要" / "no" to a specific radar gap, call:
+```
+node scripts/shell.js radar:reject <category>
+```
+
+This increments the rejection counter for that category so the radar won't nag.
+
+---
+
 ## Auto-trigger / First-run
 
 On new Mapick session, run `node scripts/shell.js init` (idempotent, 30-min cooldown). Detail: `reference/lifecycle.md#auto-trigger-on-new-conversation`.
@@ -559,6 +599,7 @@ User-facing:
 | `/mapick workflow`       | Frequent sequences                                   |
 | `/mapick daily`          | Daily digest                                         |
 | `/mapick weekly`         | Weekly summary                                       |
+| `/mapick radar`          | Daily gap radar (silent when nothing to report)      |
 | `/mapick profile clear`  | Reset workflow profile + retrigger first-run summary |
 | `/mapick diagnose`       | Show loaded version/path and workspace shadow risks  |
 

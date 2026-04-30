@@ -362,6 +362,7 @@ Skills:   recommend [limit] | recommend:track <recId> <skillId> <action>
           clean | clean:track <skillId>
           uninstall <skillId> [--confirm]
 Reports:  workflow | daily | weekly | notify | report | share <reportId> <html> [locale]
+Radar:    radar | radar:reject <category>
 Bundles:  bundle [id] | bundle install <id> | bundle track-installed <id>
 Security: security <skillId> | security:report <skillId> <reason> <evidence>
 Privacy:  privacy {status|trust <id>|untrust <id>|delete-all --confirm
