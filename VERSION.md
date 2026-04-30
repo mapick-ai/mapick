@@ -2,6 +2,12 @@
 
 All notable changes to Mapick will be documented in this file.
 
+## v0.0.24 - 2026-04-30
+
+### Changed
+
+- Expand SKILL.md permission declarations to cover all runtime file paths (fixes ClawScan permission mismatch finding)
+
 ## v0.0.23 - 2026-04-30
 
 ### Changed
