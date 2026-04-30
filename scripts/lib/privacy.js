@@ -18,6 +18,59 @@ function isRemoteCommand(command, args) {
   return false;
 }
 
+// P3: Function-level consent — first network operation triggers a prompt.
+// Returns true when the user has never set network_consent AND has never
+// explicitly declined global consent. The prompt is a one-time gate.
+function isFirstNetworkUse(config) {
+  // If user already chose always or once, no prompt needed.
+  if (config.network_consent === "always") return false;
+  if (config.network_consent === "once") return false;
+  // If user explicitly declined globally, handled by isConsentDeclined gate.
+  if (config.network_consent === "declined") return false;
+  // No preference set → first network use.
+  return true;
+}
+
+function networkConsentPrompt(_ctx) {
+  return {
+    intent: "network_consent_required",
+    message: "为了推荐 skill，Mapick 会发送：匿名设备 ID、已安装 skill 名称、搜索关键词。不会发送聊天全文、API key、文件内容。允许这次搜索吗？",
+    messageEn: "To recommend skills, Mapick will send: anonymous device ID, installed skill names, search keywords. Chat content, API keys, and file contents are NEVER sent. Allow this search?",
+    options: [
+      { id: "always", label: "允许并记住", labelEn: "Allow and remember" },
+      { id: "once", label: "仅这一次", labelEn: "Just this once" },
+      { id: "declined", label: "本地模式", labelEn: "Local mode" },
+    ],
+    // The AI should re-run the original command after setting consent.
+  };
+}
+
+async function handleNetworkConsent(args) {
+  const choice = args[0];
+  if (!["always", "once", "declined"].includes(choice)) {
+    return { error: "invalid_choice", valid: ["always", "once", "declined"] };
+  }
+  writeConfig("network_consent", choice);
+  writeConfig("network_consent_at", isoNow());
+  if (choice === "declined") {
+    return {
+      intent: "network_consent",
+      choice: "declined",
+      mode: "local_only",
+      hint: "Remote commands disabled. Use `node scripts/shell.js privacy consent-agree` to resume, or `node scripts/shell.js network-consent always` to allow.",
+    };
+  }
+  return {
+    intent: "network_consent",
+    choice,
+    hint: choice === "once"
+      ? "This command will run, then you'll be prompted again next time."
+      : "All future network operations will proceed without prompting.",
+    // Tell the AI to re-run the original command.
+    retry_original_command: true,
+  };
+}
+
 function remoteAccessError(_config) {
   // Only reached when isConsentDeclined === true; the new-install consent
   // gate is gone (opt-out model).
@@ -189,6 +242,9 @@ async function handle(args, ctx) {
       };
     }
 
+    case "network-consent":
+      return handleNetworkConsent(args.slice(1));
+
     default:
       return {
         error: "unknown_subcommand",
@@ -197,4 +253,11 @@ async function handle(args, ctx) {
   }
 }
 
-module.exports = { handle, isRemoteCommand, remoteAccessError };
+module.exports = {
+  handle,
+  handleNetworkConsent,
+  isRemoteCommand,
+  isFirstNetworkUse,
+  networkConsentPrompt,
+  remoteAccessError,
+};

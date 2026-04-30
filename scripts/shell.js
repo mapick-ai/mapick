@@ -55,6 +55,7 @@ const HANDLERS = {
   "security:report": security.handleReport,
 
   privacy: privacy.handle,
+  "network-consent": privacy.handleNetworkConsent,
 
   "update:check": updates.handleCheck,
   "update:settings": updates.handleSettings,
@@ -98,9 +99,25 @@ async function main() {
     fp: core.deviceFp(),
   };
 
-  // Opt-out model: data flows by default. Only block remote commands when
-  // the user has explicitly run `privacy consent-decline`. New installs
-  // skip the consent gate entirely.
+  // P3: Function-level consent gate. On first network operation, prompt the
+  // user before sending any data. Once consent is set (always/once/declined),
+  // this gate is skipped.
+  if (privacy.isRemoteCommand(command, args) && privacy.isFirstNetworkUse(ctx.config)) {
+    console.log(JSON.stringify(privacy.networkConsentPrompt(ctx)));
+    return;
+  }
+
+  // P3 declined gate: network_consent === "declined" blocks remote commands.
+  if (privacy.isRemoteCommand(command, args) && ctx.config.network_consent === "declined") {
+    console.log(JSON.stringify({
+      error: "network_consent_declined",
+      mode: "local_only",
+      hint: "You chose local mode. Run `node scripts/shell.js network-consent always` to allow network access, or use local-only features.",
+    }));
+    return;
+  }
+
+  // Opt-out model: global consent_declined blocks remote commands.
   if (privacy.isRemoteCommand(command, args) && core.isConsentDeclined(ctx.config)) {
     console.log(JSON.stringify(privacy.remoteAccessError(ctx.config)));
     return;
@@ -109,6 +126,15 @@ async function main() {
   const handler = HANDLERS[command] || misc.handleUnknown;
   const result = await handler(args, ctx);
   console.log(JSON.stringify(core.clampOutput(result)));
+
+  // P3: "once" consent expires after one successful remote command.
+  if (
+    privacy.isRemoteCommand(command, args) &&
+    ctx.config.network_consent === "once"
+  ) {
+    core.deleteConfig("network_consent");
+    core.deleteConfig("network_consent_at");
+  }
 }
 
 main().catch((e) => console.log(JSON.stringify({ error: e.message })));

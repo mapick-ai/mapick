@@ -83,9 +83,44 @@ For `search` with empty `items` (or `emptyReason: "no_matches"`): suggest broade
 ### Intent: privacy
 Triggers: privacy, redact, who can see my data, delete my data, forget me, anonymous mode.
 
-### Privacy model: opt-out
+### Privacy model: function-level consent (P3)
 
-Mapick defaults to data-sharing **on** (anonymous device fp + Skill IDs + timestamps; no chat content, no API tokens). Users opt out at any time. There is no "first-install agreement gate" — `recommend`, `search`, `bundle`, `security` all work immediately.
+Mapick defaults to **prompt-on-first-use**: the first time you run a command that needs the network (recommend, search, report, etc.), Mapick asks for consent. No data is sent until you choose one of three options:
+
+- **允许并记住** (`always`) — allow all future network operations without prompting.
+- **仅这一次** (`once`) — allow this one command; prompt again next time.
+- **本地模式** (`declined`) — all remote commands disabled. Use local-only features.
+
+Once a choice is made, it's stored in CONFIG.md. You can change it at any time:
+- `node scripts/shell.js network-consent always`
+- `node scripts/shell.js network-consent declined`
+
+### Consent dialog (P3 — render exactly)
+
+When shell returns `{ intent: "network_consent_required", ... }`, render this dialog in the user's language:
+
+```
+🔒 首次联网确认
+
+Mapick 需要联网来推荐 skill。**不会发送**聊天内容、API key、文件内容。
+
+仅发送：
+• 匿名设备 ID
+• 已安装 skill 名称列表
+• 搜索关键词
+
+选择：
+1. 允许并记住 — 以后不再询问
+2. 仅这一次 — 下次再问
+3. 本地模式 — 只使用本地功能
+
+回复 1、2 或 3。
+```
+
+On user pick:
+- **1 → "允许并记住"**: run `node scripts/shell.js network-consent always`, then re-run the original command.
+- **2 → "仅这一次"**: run `node scripts/shell.js network-consent once`, then re-run the original command. Consent expires after this command.
+- **3 → "本地模式"**: run `node scripts/shell.js network-consent declined`. Do NOT re-run the original command. Show local alternatives instead.
 
 ### Subcommands
 - `node scripts/shell.js privacy status` — current mode (default vs declined) + trusted skills list
@@ -94,6 +129,7 @@ Mapick defaults to data-sharing **on** (anonymous device fp + Skill IDs + timest
 - `node scripts/shell.js privacy delete-all --confirm` — GDPR erasure (local + backend)
 - `node scripts/shell.js privacy consent-decline` — opt out: refuse remote commands client-side
 - `node scripts/shell.js privacy consent-agree` — undo a previous decline (only needed if you ran `consent-decline`)
+- `node scripts/shell.js network-consent <always|once|declined>` — set function-level network consent
 - `node scripts/shell.js privacy log [limit]` — show last N outbound HTTP entries (endpoint + field names + status, never values)
 
 ### Redaction
