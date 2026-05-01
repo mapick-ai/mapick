@@ -95,12 +95,35 @@ async function handleRadar(_args, ctx) {
   // Get installed skills for cross-reference.
   const { scanSkills } = require("./skills");
   const installed = new Set(scanSkills().map((s) => s.id.toLowerCase()));
+  const installedCount = scanSkills().length;
 
-  // Get trending recommendations as candidate gaps.
+  // Build recentSkills from top_used if available
+  let recentSkills = [];
+  if (ctx.config.top_used) {
+    try {
+      recentSkills = JSON.parse(ctx.config.top_used);
+    } catch {
+      // Parse failure, use empty
+    }
+  }
+  recentSkills = recentSkills.slice(0, 5);
+
+  // Get trending recommendations as candidate gaps — try contextual first.
   let candidates = [];
   try {
-    const resp = await httpCall("GET", `/recommendations/feed?limit=${Math.min(OUT_ARR, 10)}`);
-    candidates = resp.items || resp.recommendations || [];
+    // Try contextual endpoint first
+    let contextualUrl = `/recommendations/contextual?limit=${Math.min(OUT_ARR, 10)}&installedCount=${installedCount}`;
+    if (recentSkills.length > 0) {
+      contextualUrl += `&recentSkills=${encodeURIComponent(recentSkills.join(","))}`;
+    }
+    const resp = await httpCall("GET", contextualUrl);
+    if (!resp.error) {
+      candidates = resp.items || resp.recommendations || [];
+    } else {
+      // Fall back to feed endpoint on contextual error
+      const feedResp = await httpCall("GET", `/recommendations/feed?limit=${Math.min(OUT_ARR, 10)}`);
+      candidates = feedResp.items || feedResp.recommendations || [];
+    }
   } catch {
     return { intent: "radar", silent: true, reason: "backend_unreachable" };
   }

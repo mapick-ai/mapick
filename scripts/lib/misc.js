@@ -7,7 +7,7 @@ const {
   CONFIG_DIR, OUT_ARR, VALID_EVENT_ACTIONS,
   isoNow, extractProfileTags, redactForUpload,
   readConfig, writeConfig, deleteConfig,
-  isConsentDeclined, readInstalledVersion, resolveCanonicalSlug,
+  isConsentDeclined, getProactiveMode, readInstalledVersion, resolveCanonicalSlug,
 } = require("./core");
 const { httpCall, apiCall, missingArg } = require("./http");
 
@@ -275,7 +275,16 @@ async function handleProfile(args, ctx) {
   switch (sub) {
     case "set": {
       const text = args.slice(1).join(" ").trim();
-      if (!text) return missingArg('Usage: profile set "<workflow text>"');
+      if (!text) return missingArg('Usage: profile set "<workflow text>" or profile set proactive_mode=<helpful|silent|off>');
+
+      // Check for proactive_mode setting
+      const proactiveMatch = text.match(/^proactive_mode\s*=\s*(helpful|silent|off)$/i);
+      if (proactiveMatch) {
+        const mode = proactiveMatch[1].toLowerCase();
+        writeConfig("proactive_mode", mode);
+        return { intent: "profile:set", proactive_mode: mode, updated: true };
+      }
+
       // P0: redact before persisting to CONFIG.md — prevents secrets leak.
       const redacted = redactForUpload(text);
       if (!redacted.ok) {
@@ -309,6 +318,7 @@ async function handleProfile(args, ctx) {
         profile: ctx.config.user_profile || null,
         tags,
         set_at: ctx.config.user_profile_set_at || null,
+        proactive_mode: ctx.config.proactive_mode || "helpful",
       };
     }
     case "clear": {

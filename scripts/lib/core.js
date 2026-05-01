@@ -178,6 +178,14 @@ function isConsentDeclined(config) {
   return config.consent_declined === "true";
 }
 
+// Get proactive mode preference from config.
+// Valid values: "helpful" (default), "silent", "off"
+function getProactiveMode(config) {
+  const mode = config.proactive_mode;
+  if (mode === "silent" || mode === "off") return mode;
+  return "helpful"; // default
+}
+
 // Validate skill IDs to prevent path traversal / injection.
 // Only alphanumeric, underscore, hyphen; 1-64 chars.
 const VALID_SKILL_ID_RE = /^[a-zA-Z0-9_.-]{1,64}$/;
@@ -292,6 +300,6 @@ module.exports = {
   VALID_TRACK_ACTIONS, VALID_EVENT_ACTIONS, PROTECTED_SKILLS, REMOTE_COMMANDS,
   stableHash16, isoNow, clampOutput, parseFrontmatter, extractProfileTags,
   readConfig, writeConfig, deleteConfig, readCache, writeCache, deviceFp,
-  isProtected, isConsentDeclined, validateSkillId, resolveCanonicalSlug,
+  isProtected, isConsentDeclined, getProactiveMode, validateSkillId, resolveCanonicalSlug,
   redactForUpload, readInstalledVersion,
 };

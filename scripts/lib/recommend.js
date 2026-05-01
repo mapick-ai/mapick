@@ -206,32 +206,59 @@ async function handleIntent(args) {
 
 async function handleRecommend(args, ctx) {
   const withProfile = args.includes("--with-profile");
+  const contextual = args.includes("--contextual");
   const numericArgs = args.filter((a) => !a.startsWith("--"));
   const limit = parseInt(numericArgs[0]) || 5;
-  const cacheKey = `recommend_${ctx.fp}_${withProfile ? "profile" : "plain"}`;
+  const cacheKey = `recommend_${ctx.fp}_${withProfile ? "profile" : "plain"}${contextual ? "_ctx" : ""}`;
   const cached = readCache(cacheKey);
 
-  // Explicit limit or --with-profile bypasses the 24h cache.
-  const useCache = !withProfile && numericArgs.length === 0;
+  // Explicit limit or --with-profile or --contextual bypasses the 24h cache.
+  const useCache = !withProfile && !contextual && numericArgs.length === 0;
   if (useCache && cached) {
     return { intent: "recommend", items: cached.items, cached: true };
   }
 
-  let url = `/recommendations/feed?limit=${limit}`;
-  if (withProfile) {
-    const tagsRaw = ctx.config.user_profile_tags || "";
-    // JSON array string; on parse failure, fall back to comma-separated.
-    let tags = [];
-    try {
-      tags = JSON.parse(tagsRaw);
-    } catch {
-      tags = tagsRaw.split(",").filter(Boolean);
+  let url;
+  if (contextual) {
+    // Contextual endpoint: use recentSkills and installedCount
+    const { scanSkills } = require("./skills");
+    const installed = scanSkills();
+    const installedCount = installed.length;
+
+    // Build recentSkills from top_used if available
+    let recentSkills = [];
+    if (ctx.config.top_used) {
+      try {
+        recentSkills = JSON.parse(ctx.config.top_used);
+      } catch {
+        // Parse failure, use empty
+      }
     }
-    if (tags.length > 0) {
-      url += `&profileTags=${encodeURIComponent(tags.join(","))}`;
+    // Take top 5 recent skills
+    recentSkills = recentSkills.slice(0, 5);
+
+    url = `/recommendations/contextual?limit=${limit}&installedCount=${installedCount}`;
+    if (recentSkills.length > 0) {
+      url += `&recentSkills=${encodeURIComponent(recentSkills.join(","))}`;
     }
-    url += `&withProfile=1`;
+  } else {
+    url = `/recommendations/feed?limit=${limit}`;
+    if (withProfile) {
+      const tagsRaw = ctx.config.user_profile_tags || "";
+      // JSON array string; on parse failure, fall back to comma-separated.
+      let tags = [];
+      try {
+        tags = JSON.parse(tagsRaw);
+      } catch {
+        tags = tagsRaw.split(",").filter(Boolean);
+      }
+      if (tags.length > 0) {
+        url += `&profileTags=${encodeURIComponent(tags.join(","))}`;
+      }
+      url += `&withProfile=1`;
+    }
   }
+
   const resp = await httpCall("GET", url);
   if (resp.error) return resp;
   const rawItems = resp.items || resp.recommendations || [];
@@ -244,6 +271,7 @@ async function handleRecommend(args, ctx) {
     intent: "recommend",
     items,
     withProfile,
+    contextual,
   };
   writeCache(cacheKey, { items: result.items });
   return result;

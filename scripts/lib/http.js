@@ -58,7 +58,7 @@ const { API_BASE, deviceFp, redactForUpload, isoNow } = require("./core");
 // stripped before matching.
 const ALLOWED_ENDPOINTS = [
   /^\/assistant\/(status|workflow|daily-digest|weekly)\/[a-f0-9]{16}$/,
-  /^\/recommendations\/(feed|track)$/,
+  /^\/recommendations\/(feed|track|contextual)$/,
   /^\/skills\/live-search$/,
   /^\/skills\/check-updates$/,
   /^\/users\/[a-f0-9]{16}\/(zombies|profile-text)$/,

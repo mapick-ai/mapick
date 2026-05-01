@@ -23,6 +23,9 @@
 ### `upgrade-plan-20260501/`
 **Mapick 升级计划** (2026-05-01)
 - `README.md` — 基于差距分析的升级路线 (Phase 1-3, P0-P2, 执行清单)
+- `ARCHITECTURE.md` — Phase 1 技术架构方案
+- `DESIGN.md` — Phase 1 CLI 体验设计文档
+- `PRD.md` — Phase 2 产品需求文档 (G4 用户偏好 / G5 Token 透明化 / G6 推荐引擎增强)
 
 ### `security-hardening-20260501/`
 **Security Hardening — P0 Issue Fixes** (2026-05-01) [Commit: `2ec4461`]

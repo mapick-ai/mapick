@@ -33,6 +33,7 @@ const radar = require("./lib/radar");
 const misc = require("./lib/misc");
 const updates = require("./lib/updates");
 const doctor = require("./lib/doctor");
+const token = require("./lib/token");
 
 const HANDLERS = {
   init: skills.handleInit,
@@ -79,7 +80,9 @@ const HANDLERS = {
   event: misc.handleEvent,
   "event:track": misc.handleEvent,
   stats: misc.handleStats,
+  "stats token": token.handleToken,
   dashboard: misc.handleDashboard,
+  token: token.handleToken,
   profile: misc.handleProfile,
   "first-run-done": misc.handleFirstRunDone,
   diagnose: misc.handleDiagnose,

@@ -849,4 +849,930 @@ Phase 1 升级聚焦于客户端改动，核心目标：
 
 ---
 
-*架构方案编写完毕，可进入代码实现阶段。*
+## 10. Phase 2 升级 — 技术架构方案
+
+**版本**：2026-05-01  
+**范围**：Phase 2 客户端改动（F1/F2/F3），增强主动性、透明度、上下文感知  
+**前置**：Phase 1 已完成
+
+---
+
+### 10.1 模块变更总览
+
+| 模块 | 改动类型 | 变更内容 |
+|------|----------|----------|
+| `CONFIG.md` | **改动** | 新增 `proactive_mode` 配置项 |
+| `scripts/lib/core.js` | **改动** | 新增 `PROACTIVE_MODES` 常量、`readProactiveMode()` helper |
+| `scripts/lib/misc.js` | **改动** | `handleProfile("set")` 支持设置 `proactive_mode` |
+| `scripts/lib/skills.js` | **改动** | `handleInit` / `handleStatus` 根据 `proactive_mode` 决定是否推荐 |
+| `scripts/lib/recommend.js` | **改动** | `handleRecommend` 支持 `--contextual` flag，切换端点 |
+| `scripts/lib/http.js` | **改动** | `ALLOWED_ENDPOINTS` 新增 `/recommendations/contextual` |
+| `scripts/lib/radar.js` | **改动** | 支持 contextual feed 端点 |
+| `scripts/lib/token.js` | **新增** | Token 使用统计模块 |
+| `scripts/shell.js` | **改动** | 新增 `stats token` 命令路由 |
+
+---
+
+### 10.2 Feature 1: Proactive Mode
+
+#### 10.2.1 配置项定义
+
+**CONFIG.md 新增字段**：
+
+```
+proactive_mode: helpful
+```
+
+**可选值**：
+| 值 | 含义 | 行为 |
+|---|---|---|
+| `helpful` | **默认** | 主动推荐：status/init 返回时附带推荐建议 |
+| `minimal` | 极简模式 | 仅响应用户明确请求，不附带额外推荐 |
+| `silent` | 静默模式 | 完全不显示推荐，仅返回状态数据 |
+
+#### 10.2.2 核心逻辑
+
+**`scripts/lib/core.js`**：
+
+```javascript
+const PROACTIVE_MODES = new Set(["helpful", "minimal", "silent"]);
+const DEFAULT_PROACTIVE_MODE = "helpful";
+
+function readProactiveMode() {
+  const config = readConfig();
+  const mode = config.proactive_mode || DEFAULT_PROACTIVE_MODE;
+  if (!PROACTIVE_MODES.has(mode)) {
+    return DEFAULT_PROACTIVE_MODE; // fallback to helpful
+  }
+  return mode;
+}
+
+function shouldShowRecommendations() {
+  return readProactiveMode() === "helpful";
+}
+
+module.exports = {
+  // ... existing exports
+  PROACTIVE_MODES,
+  DEFAULT_PROACTIVE_MODE,
+  readProactiveMode,
+  shouldShowRecommendations,
+};
+```
+
+#### 10.2.3 Profile 命令扩展
+
+**`scripts/lib/misc.js` — `handleProfile` 扩展**：
+
+```javascript
+async function handleProfile(args, ctx) {
+  const sub = args[0] || "get";
+  switch (sub) {
+    case "set": {
+      // ... existing profile text logic ...
+      
+      // 新增：支持 proactive_mode 设置
+      // 格式: profile set --proactive-mode=helpful|minimal|silent
+      const proactiveArg = args.find(a => a.startsWith("--proactive-mode="));
+      if (proactiveArg) {
+        const mode = proactiveArg.split("=")[1];
+        if (!PROACTIVE_MODES.has(mode)) {
+          return { 
+            error: "invalid_proactive_mode", 
+            valid: [...PROACTIVE_MODES],
+            hint: "Valid modes: helpful (default), minimal, silent"
+          };
+        }
+        writeConfig("proactive_mode", mode);
+        result.proactive_mode = mode;
+        result.proactive_mode_hint = mode === "helpful" 
+          ? "Mapick will proactively suggest relevant skills."
+          : mode === "minimal"
+          ? "Mapick only responds to explicit requests."
+          : "Mapick will not show recommendations.";
+      }
+      
+      return result;
+    }
+    case "get": {
+      // ... existing logic ...
+      
+      // 新增：返回 proactive_mode
+      return {
+        intent: "profile:get",
+        profile: ctx.config.user_profile || null,
+        tags,
+        set_at: ctx.config.user_profile_set_at || null,
+        proactive_mode: readProactiveMode(),
+      };
+    }
+    // ... rest of cases ...
+  }
+}
+```
+
+#### 10.2.4 Status/Init 推荐控制
+
+**`scripts/lib/skills.js`**：
+
+```javascript
+async function handleInit(_args, ctx) {
+  // ... existing logic ...
+  
+  const proactiveMode = readProactiveMode();
+  
+  // 仅 helpful 模式下附带推荐建议
+  if (proactiveMode === "helpful" && !isConsentDeclined(ctx.config)) {
+    const recommendations = await fetchRecommendations(2);
+    if (recommendations.length > 0) {
+      result.suggest_recommend = true;
+      result.recommendations = recommendations.map(r => ({
+        ...r,
+        slug: resolveCanonicalSlug(r.slug || r.id || r.name || ""),
+      }));
+      result.recommend_hint = "💡 You might find these skills useful:";
+    }
+  }
+  
+  return result;
+}
+
+async function handleStatus(_args, ctx) {
+  // ... existing logic ...
+  
+  const summary = await aggregateSummary(skills, fresh);
+  summary.workspace_shadow = workspaceShadow;
+  summary.workspace_shadow_path = workspaceShadow ? workspaceDuplicate : null;
+  
+  // 仅 helpful 模式下附带推荐建议
+  if (readProactiveMode() === "helpful" && !isConsentDeclined(ctx.config)) {
+    const recommendations = await fetchRecommendations(2);
+    if (recommendations.length > 0) {
+      summary.suggest_recommend = true;
+      summary.recommendations = recommendations.map(r => ({
+        ...r,
+        slug: resolveCanonicalSlug(r.slug || r.id || r.name || ""),
+      }));
+    }
+  }
+  
+  return summary;
+}
+```
+
+#### 10.2.5 AI 渲染规则
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│                   Proactive Mode 渲染逻辑                     │
+└──────────────────────────────────────────────────────────────┘
+
+  ┌─────────────────┐
+  │ handleInit /    │
+  │ handleStatus    │
+  └────────┬────────┘
+           │
+           ▼
+  ┌─────────────────────────────────────────────────────────────┐
+  │                Check proactive_mode                         │
+  │                                                             │
+  │  ┌───────────────────────────────────────────────────────┐ │
+  │  │ helpful                                               │ │
+  │  │                                                       │ │
+  │  │ → Fetch 2 recommendations                             │ │
+  │  │ → If recommendations.length > 0:                     │ │
+  │  │    → Show: "💡 You might find these skills useful:"  │ │
+  │  │    → Render recommendations (≤2 lines each)          │ │
+  │  │ → Else: silence-first, no extra output               │ │
+  │  └───────────────────────────────────────────────────────┘ │
+  │                                                             │
+  │  ┌───────────────────────────────────────────────────────┐ │
+  │  │ minimal / silent                                      │ │
+  │  │                                                       │ │
+  │  │ → Skip recommendation fetch entirely                  │ │
+  │  │ → Return pure status data only                        │ │
+  │  └───────────────────────────────────────────────────────┘ │
+  └─────────────────────────────────────────────────────────────┘
+
+  用户切换模式:
+  
+  /mapick profile set --proactive-mode=minimal
+  → AI: "✅ 已切换到极简模式。之后 /mapick status 不会再附带推荐建议。"
+```
+
+---
+
+### 10.3 Feature 2: Token Transparency
+
+#### 10.3.1 数据源分析
+
+OpenClaw session JSONL 路径：
+```
+~/.openclaw/agents/main/sessions/*.jsonl
+```
+
+**JSONL 行结构（典型）**：
+
+```json
+{
+  "ts": "2026-05-01T09:15:23.456Z",
+  "event": "model_call",
+  "model": "claude-3-sonnet",
+  "input_tokens": 1245,
+  "output_tokens": 387,
+  "cost_usd": 0.0234
+}
+```
+
+#### 10.3.2 Token 模块设计
+
+**新建 `scripts/lib/token.js`**：
+
+```javascript
+const fs = require("fs");
+const path = require("path");
+const os = require("os");
+const { isoNow, readCache, writeCache, readConfig, writeConfig } = require("./core");
+
+const SESSION_DIR = path.join(os.homedir(), ".openclaw", "agents", "main", "sessions");
+const TOKEN_CACHE_KEY = "token_stats";
+const TOKEN_CACHE_TTL_HOURS = 1;
+
+// Token 使用记录结构
+function parseSessionLine(line) {
+  try {
+    const entry = JSON.parse(line);
+    if (entry.event === "model_call" && entry.input_tokens && entry.output_tokens) {
+      return {
+        ts: entry.ts,
+        model: entry.model || "unknown",
+        input_tokens: entry.input_tokens,
+        output_tokens: entry.output_tokens,
+        total_tokens: (entry.input_tokens || 0) + (entry.output_tokens || 0),
+        cost_usd: entry.cost_usd || null,
+      };
+    }
+  } catch {}
+  return null;
+}
+
+// 读取所有 session 文件并聚合
+function aggregateTokenUsage(sinceDate = null) {
+  if (!fs.existsSync(SESSION_DIR)) {
+    return { error: "session_dir_not_found", path: SESSION_DIR };
+  }
+  
+  const sessionFiles = fs.readdirSync(SESSION_DIR)
+    .filter(f => f.endsWith(".jsonl"))
+    .map(f => path.join(SESSION_DIR, f));
+  
+  const records = [];
+  for (const file of sessionFiles) {
+    try {
+      const lines = fs.readFileSync(file, "utf8").split("\n").filter(Boolean);
+      for (const line of lines) {
+        const record = parseSessionLine(line);
+        if (record) {
+          // 时间过滤
+          if (sinceDate) {
+            const recordTs = new Date(record.ts).getTime();
+            const sinceTs = new Date(sinceDate).getTime();
+            if (recordTs < sinceTs) continue;
+          }
+          records.push(record);
+        }
+      }
+    } catch {}
+  }
+  
+  return records;
+}
+
+// 按时间段聚合统计
+function summarizeTokenUsage(records) {
+  const total_input = records.reduce((sum, r) => sum + (r.input_tokens || 0), 0);
+  const total_output = records.reduce((sum, r) => sum + (r.output_tokens || 0), 0);
+  const total_tokens = total_input + total_output;
+  const total_cost = records.reduce((sum, r) => sum + (r.cost_usd || 0), 0);
+  
+  // 按模型分组
+  const byModel = {};
+  for (const r of records) {
+    const model = r.model || "unknown";
+    if (!byModel[model]) {
+      byModel[model] = { input: 0, output: 0, count: 0 };
+    }
+    byModel[model].input += r.input_tokens || 0;
+    byModel[model].output += r.output_tokens || 0;
+    byModel[model].count += 1;
+  }
+  
+  return {
+    total_input,
+    total_output,
+    total_tokens,
+    total_cost_usd: total_cost,
+    sessions_count: records.length,
+    by_model: byModel,
+  };
+}
+
+// 获取时间范围起始点
+function getStartDate(range) {
+  const now = new Date();
+  switch (range) {
+    case "today":
+      return new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
+    case "week":
+      const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+      return weekAgo.toISOString();
+    case "month":
+      const monthAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+      return monthAgo.toISOString();
+    default:
+      return null; // all time
+  }
+}
+
+// Shell handler: stats token [today|week|month]
+function handleStatsToken(args) {
+  const range = args[0] || "today";
+  const validRanges = ["today", "week", "month", "all"];
+  if (!validRanges.includes(range)) {
+    return { 
+      error: "invalid_range", 
+      valid: validRanges,
+      hint: "Usage: stats token [today|week|month|all]"
+    };
+  }
+  
+  // 尝试使用缓存（仅 today 和 week）
+  const shouldCache = range === "today" || range === "week";
+  if (shouldCache) {
+    const cacheKey = `${TOKEN_CACHE_KEY}_${range}`;
+    const cached = readCache(cacheKey);
+    if (cached) {
+      return { 
+        intent: "stats:token", 
+        range, 
+        ...cached.stats,
+        cached: true,
+        cached_at: cached.cached_at
+      };
+    }
+  }
+  
+  const sinceDate = getStartDate(range);
+  const records = aggregateTokenUsage(sinceDate);
+  
+  if (records.error) {
+    return { 
+      intent: "stats:token", 
+      range, 
+      error: records.error,
+      hint: "OpenClaw session logs not found. Token tracking requires OpenClaw to be installed."
+    };
+  }
+  
+  const summary = summarizeTokenUsage(records);
+  
+  // 写入缓存
+  if (shouldCache) {
+    const cacheKey = `${TOKEN_CACHE_KEY}_${range}`;
+    writeCache(cacheKey, { stats: summary }, TOKEN_CACHE_TTL_HOURS);
+  }
+  
+  // 存储到 CONFIG.md（可选，用于 dashboard）
+  writeConfig(`last_token_${range}_at`, isoNow());
+  writeConfig(`token_${range}_total`, String(summary.total_tokens));
+  
+  return {
+    intent: "stats:token",
+    range,
+    ...summary,
+    records_sample: records.slice(0, 5), // 仅展示前 5 条原始记录
+  };
+}
+
+module.exports = {
+  handleStatsToken,
+  aggregateTokenUsage,
+  summarizeTokenUsage,
+  parseSessionLine,
+  getStartDate,
+};
+```
+
+#### 10.3.3 数据流图
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                    Token Tracking Data Flow                          │
+└─────────────────────────────────────────────────────────────────────┘
+
+  ┌──────────────────────────────────────────────────────────────────┐
+  │                  OpenClaw Session JSONL                           │
+  │                                                                   │
+  │  ~/.openclaw/agents/main/sessions/*.jsonl                        │
+  │                                                                   │
+  │  ┌─────────────────────────────────────────────────────────────┐ │
+  │  │ Line 1: { event: "model_call", input: 1245, output: 387 }  │ │
+  │  │ Line 2: { event: "model_call", input: 892, output: 234 }   │ │
+  │  │ Line 3: { event: "model_call", input: 1567, output: 512 }  │ │
+  │  │ ...                                                        │ │
+  │  └─────────────────────────────────────────────────────────────┘ │
+  └──────────────────────────────────┬───────────────────────────────┘
+                                     │
+                                     │ fs.readFileSync()
+                                     │
+                                     ▼
+  ┌──────────────────────────────────────────────────────────────────┐
+  │                     aggregateTokenUsage()                         │
+  │                                                                   │
+  │  1. 遍历所有 *.jsonl 文件                                        │
+  │  2. 逐行 JSON.parse()                                            │
+  │  3. 过滤 event === "model_call"                                  │
+  │  4. 时间范围筛选 (sinceDate)                                     │
+  │                                                                   │
+  │  → records[] = [{ ts, model, input, output, cost }, ...]        │
+  └──────────────────────────────────┬───────────────────────────────┘
+                                     │
+                                     │ summarizeTokenUsage()
+                                     │
+                                     ▼
+  ┌──────────────────────────────────────────────────────────────────┐
+  │                     Token Summary                                 │
+  │                                                                   │
+  │  {                                                                │
+  │    total_input: 3704,                                            │
+  │    total_output: 1133,                                           │
+  │    total_tokens: 4837,                                           │
+  │    total_cost_usd: 0.0678,                                       │
+  │    sessions_count: 3,                                            │
+  │    by_model: {                                                   │
+  │      "claude-3-sonnet": { input: 3704, output: 1133, count: 3 } │
+  │    }                                                              │
+  │  }                                                                │
+  └──────────────────────────────────┬───────────────────────────────┘
+                                     │
+                                     ├──────────────────┬─────────────
+                                     │                  │
+                                     ▼                  ▼
+                    ┌────────────────────┐    ┌──────────────────────┐
+                    │   Cache (1h TTL)   │    │   CONFIG.md          │
+                    │                    │    │                      │
+                    │  ~/.mapick/cache/  │    │  token_today_total   │
+                    │  token_stats_today │    │  last_token_today_at │
+                    │                    │    │                      │
+                    │  仅 today/week     │    │  (用于 dashboard)    │
+                    └────────────────────┘    └──────────────────────┘
+                                     │
+                                     ▼
+                    ┌────────────────────────────────────────────────┐
+                    │            Shell Response                      │
+                    │                                                │
+                    │  stats token today                             │
+                    │                                                │
+                    │  → AI renders:                                 │
+                    │                                                │
+                    │  ┌──────────────────────────────────────────┐ │
+                    │  │ 📊 Token Usage Today                     │ │
+                    │  │                                          │ │
+                    │  │ Total: 4,837 tokens                      │ │
+                    │  │ Input:  3,704 | Output: 1,133           │ │
+                    │  │ Cost:   $0.0678                          │ │
+                    │  │                                          │ │
+                    │  │ By model:                                │ │
+                    │  │ • claude-3-sonnet: 3 sessions            │ │
+                    │  └──────────────────────────────────────────┘ │
+                    └────────────────────────────────────────────────┘
+```
+
+#### 10.3.4 Shell 命令路由
+
+**`scripts/shell.js` 扩展**：
+
+```javascript
+// stats 子命令路由
+if (command === "stats") {
+  const sub = args[0] || "";
+  if (sub === "token") {
+    const { handleStatsToken } = require("./lib/token");
+    return handleStatsToken(args.slice(1));
+  }
+  // 原有 stats 命令
+  const { handleStats } = require("./lib/misc");
+  return handleStats();
+}
+```
+
+---
+
+### 10.4 Feature 3: Contextual Recommendations
+
+#### 10.4.1 端点变更
+
+| 原端点 | 新端点 | 差异 |
+|-------|-------|------|
+| `GET /recommendations/feed` | `GET /recommendations/contextual` | 接收当前 session 上下文参数 |
+| 无 profile 参数 | `profileTags` + `currentSession` | 后端根据上下文匹配推荐 |
+
+#### 10.4.2 HTTP Allowlist 扩展
+
+**`scripts/lib/http.js`**：
+
+```javascript
+const ALLOWED_ENDPOINTS = [
+  /^\/assistant\/(status|workflow|daily-digest|weekly)\/[a-f0-9]{16}$/,
+  /^\/recommendations\/(feed|track|contextual)$/,  // ← 新增 contextual
+  /^\/skills\/live-search$/,
+  // ... rest of patterns ...
+];
+```
+
+#### 10.4.3 Recommend Handler 扩展
+
+**`scripts/lib/recommend.js`**：
+
+```javascript
+async function handleRecommend(args, ctx) {
+  const withProfile = args.includes("--with-profile");
+  const contextual = args.includes("--contextual");  // ← 新增 flag
+  const numericArgs = args.filter((a) => !a.startsWith("--"));
+  const limit = parseInt(numericArgs[0]) || 5;
+  
+  // 缓存策略：contextual 模式不缓存（上下文可能变化）
+  const cacheKey = contextual 
+    ? null 
+    : `recommend_${ctx.fp}_${withProfile ? "profile" : "plain"}`;
+  
+  // 仅非 contextual 模式使用缓存
+  if (cacheKey) {
+    const cached = readCache(cacheKey);
+    const useCache = !withProfile && numericArgs.length === 0;
+    if (useCache && cached) {
+      return { intent: "recommend", items: cached.items, cached: true };
+    }
+  }
+  
+  // 端点选择
+  const endpoint = contextual 
+    ? "/recommendations/contextual" 
+    : "/recommendations/feed";
+  
+  let url = `${endpoint}?limit=${limit}`;
+  
+  // Profile tags 参数
+  if (withProfile || contextual) {
+    const tagsRaw = ctx.config.user_profile_tags || "";
+    let tags = [];
+    try {
+      tags = JSON.parse(tagsRaw);
+    } catch {
+      tags = tagsRaw.split(",").filter(Boolean);
+    }
+    if (tags.length > 0) {
+      url += `&profileTags=${encodeURIComponent(tags.join(","))}`;
+    }
+  }
+  
+  // Contextual 模式：额外传递当前 session 信息
+  if (contextual) {
+    // 从最近技能操作推断上下文
+    const recentSkills = getRecentSkillInteractions(3);
+    if (recentSkills.length > 0) {
+      url += `&recentSkills=${encodeURIComponent(recentSkills.join(","))}`;
+    }
+    
+    // 当前安装的技能数量（作为上下文信号）
+    const { scanSkills } = require("./skills");
+    const installed = scanSkills();
+    url += `&installedCount=${installed.length}`;
+    
+    url += `&contextual=1`;
+  }
+  
+  const resp = await httpCall("GET", url);
+  if (resp.error) return resp;
+  
+  const rawItems = resp.items || resp.recommendations || [];
+  const items = rawItems.map((item) => ({
+    ...item,
+    slug: resolveCanonicalSlug(item.slug || item.id || item.name || ""),
+  }));
+  
+  const result = {
+    intent: "recommend",
+    items,
+    withProfile,
+    contextual,
+    endpoint_used: endpoint,
+  };
+  
+  // 仅非 contextual 模式写入缓存
+  if (cacheKey && !contextual) {
+    writeCache(cacheKey, { items: result.items });
+  }
+  
+  return result;
+}
+
+// 获取最近技能交互（用于 contextual 推荐）
+function getRecentSkillInteractions(limit = 3) {
+  const { readOutboundLog } = require("./audit");
+  try {
+    const events = readOutboundLog();
+    const skillEvents = events.filter(e => 
+      e.endpoint?.includes("/events/track") ||
+      e.endpoint?.includes("/recommendations/track")
+    );
+    
+    // 提取 skillId，去重，取最近 limit 个
+    const seen = new Set();
+    const recent = [];
+    for (const e of skillEvents.reverse()) {
+      const skillId = e.body_fields?.skillId || e.params?.skillId;
+      if (skillId && !seen.has(skillId)) {
+        seen.add(skillId);
+        recent.push(skillId);
+        if (recent.length >= limit) break;
+      }
+    }
+    return recent;
+  } catch {
+    return [];
+  }
+}
+```
+
+#### 10.4.4 Radar 模块适配
+
+**`scripts/lib/radar.js`**：
+
+```javascript
+async function handleRadar(_args, ctx) {
+  // ... existing consent and frequency checks ...
+  
+  // 新增：支持 contextual 模式
+  const useContextual = ctx.config.proactive_mode === "helpful";
+  
+  const endpoint = useContextual 
+    ? "/recommendations/contextual" 
+    : "/recommendations/feed";
+  
+  let candidates = [];
+  try {
+    let url = `${endpoint}?limit=${Math.min(OUT_ARR, 10)}`;
+    
+    // Contextual 参数
+    if (useContextual) {
+      const tagsRaw = ctx.config.user_profile_tags || "";
+      let tags = [];
+      try { tags = JSON.parse(tagsRaw); } catch { tags = tagsRaw.split(",").filter(Boolean); }
+      if (tags.length > 0) {
+        url += `&profileTags=${encodeURIComponent(tags.join(","))}`;
+      }
+      
+      const recentSkills = getRecentSkillInteractions(3);
+      if (recentSkills.length > 0) {
+        url += `&recentSkills=${encodeURIComponent(recentSkills.join(","))}`;
+      }
+      
+      url += `&contextual=1`;
+    }
+    
+    const resp = await httpCall("GET", url);
+    candidates = resp.items || resp.recommendations || [];
+  } catch {
+    return { intent: "radar", silent: true, reason: "backend_unreachable" };
+  }
+  
+  // ... rest of existing logic ...
+}
+```
+
+---
+
+### 10.5 模块交互图
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                      Phase 2 Module Interaction Map                          │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────┐     ┌─────────────────────┐     ┌─────────────────────┐
+│     CONFIG.md       │     │   scripts/lib/      │     │   OpenClaw         │
+│                     │     │                     │     │   Sessions         │
+│ ┌─────────────────┐ │     │ ┌─────────────────┐ │     │ ┌─────────────────┐ │
+│ │ proactive_mode  │ │     │ │ core.js         │ │     │ │ *.jsonl         │ │
+│ │ helpful/minimal │ │◄────│ │ readProactive() │ │     │ │ model_call      │ │
+│ │ /silent         │ │     │ │ shouldShowRec() │ │     │ │ input/output    │ │
+│ └─────────────────┘ │     │ └─────────────────┘ │     │ └─────────────────┘ │
+│ ┌─────────────────┐ │     │ ┌─────────────────┐ │     └─────────────────────┘
+│ │ user_profile    │ │     │ │ misc.js         │ │              │
+│ │ user_profile_   │ │◄────│ │ handleProfile() │ │              │
+│ │ tags            │ │     │ │   (set/get)     │ │              ▼
+│ └─────────────────┘ │     │ └─────────────────┘ │     ┌─────────────────────┐
+│ ┌─────────────────┐ │     │ ┌─────────────────┐ │     │ scripts/lib/token.js│
+│ │ token_today_    │ │◄────│ │ skills.js       │ │     │ ┌─────────────────┐ │
+│ │ total           │ │     │ │ handleInit()    │ │     │ │ handleStatsToken│ │
+│ └─────────────────┘ │     │ │ handleStatus()  │ │◄────│ │ aggregateUsage  │ │
+│                     │     │ └─────────────────┘ │     │ │ summarizeUsage  │ │
+└─────────────────────┘     │ ┌─────────────────┐ │     └─────────────────┘ │
+                            │ │ recommend.js    │ │     └─────────────────────┘
+              ┌─────────────│ │ handleRecommend │ │              │
+              │             │ │   --contextual  │ │              ▼
+              │             │ └─────────────────┘ │     ┌─────────────────────┐
+              │             │ ┌─────────────────┐ │     │ ~/.mapick/cache/    │
+              │             │ │ radar.js        │ │     │ token_stats_today   │
+              │             │ │ handleRadar()   │ │◄────│ token_stats_week    │
+              │             │ │   contextual    │ │     └─────────────────────┘
+              │             │ └─────────────────┘ │
+              │             │ ┌─────────────────┐ │
+              │             │ │ http.js         │ │
+              │             │ │ ALLOWED_        │ │
+              │             │ │ ENDPOINTS       │ │◄──── 新增 /recommendations/contextual
+              │             │ └─────────────────┘ │
+              │             └─────────────────────┘
+              │                        │
+              │                        ▼
+              │             ┌─────────────────────────────────────────────────────┐
+              │             │                    Backend API                      │
+              │             │                                                     │
+              │             │  GET /recommendations/feed                         │
+              │             │  GET /recommendations/contextual ← NEW             │
+              │             │      ?profileTags=rust,typescript                  │
+              │             │      &recentSkills=code-review,git-helper         │
+              │             │      &installedCount=12                            │
+              │             │      &contextual=1                                 │
+              │             └─────────────────────────────────────────────────────┘
+              │
+              ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                          Shell Command Routing                               │
+│                                                                             │
+│  /mapick profile set --proactive-mode=minimal                               │
+│      → handleProfile("set", ["--proactive-mode=minimal"])                   │
+│      → writeConfig("proactive_mode", "minimal")                             │
+│                                                                             │
+│  /mapick status                                                             │
+│      → handleStatus()                                                       │
+│      → if readProactiveMode() === "helpful":                                │
+│          → fetchRecommendations(2)                                          │
+│          → result.suggest_recommend = true                                  │
+│                                                                             │
+│  /mapick stats token today                                                  │
+│      → handleStatsToken(["today"])                                          │
+│      → aggregateTokenUsage(todayStart)                                      │
+│      → summarizeTokenUsage(records)                                         │
+│      → writeCache("token_stats_today", summary)                             │
+│                                                                             │
+│  /mapick recommend --contextual                                             │
+│      → handleRecommend(["--contextual"])                                    │
+│      → endpoint = "/recommendations/contextual"                             │
+│      → url += &recentSkills=... &installedCount=...                         │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+### 10.6 错误处理策略
+
+#### 10.6.1 Proactive Mode 错误处理
+
+| 失败点 | 错误类型 | Fallback 策略 |
+|-------|---------|---------------|
+| `proactive_mode` 无效值 | 未知模式 | fallback 到 `helpful` |
+| 推荐获取失败 | 网络错误 | silence-first，不附带推荐 |
+| Profile 设置无效参数 | 缺少值 | 返回 `error: invalid_proactive_mode` |
+
+#### 10.6.2 Token Tracking 错误处理
+
+| 失败点 | 错误类型 | Fallback 策略 |
+|-------|---------|---------------|
+| Session 目录不存在 | `session_dir_not_found` | 返回错误 + 提示 OpenClaw 未安装 |
+| JSONL 解析失败 | 单行 JSON 异常 | 跳过该行，继续处理 |
+| 缓存读取失败 | 缓存损坏 | 直接读取 JSONL，重新聚合 |
+| 时间范围无效 | 未知参数 | 返回 `error: invalid_range` |
+
+#### 10.6.3 Contextual Recommendations 错误处理
+
+| 失败点 | 错误类型 | Fallback 策略 |
+|-------|---------|---------------|
+| `/recommendations/contextual` 不可达 | 网络错误 | fallback 到 `/recommendations/feed` |
+| 端点不在 allowlist | 安全拒绝 | 返回 `endpoint_not_allowed` |
+| recentSkills 解析失败 | audit 日志异常 | 不传递 recentSkills 参数 |
+| 后端返回空结果 | 无匹配推荐 | silence-first，返回空数组 |
+
+---
+
+### 10.7 影响分析
+
+#### 10.7.1 现有模块影响
+
+| 模块 | 影响程度 | 改动范围 |
+|-----|---------|---------|
+| `skills.js` | **中等** | `handleInit` / `handleStatus` 新增推荐逻辑 |
+| `misc.js` | **低** | `handleProfile` 新增 proactive_mode 设置 |
+| `recommend.js` | **中等** | `handleRecommend` 新增 `--contextual` 分支 |
+| `http.js` | **低** | Allowlist 新增一条规则 |
+| `radar.js` | **低** | 端点选择逻辑新增 contextual 分支 |
+| `shell.js` | **低** | `stats` 命令新增 `token` 子路由 |
+
+#### 10.7.2 新增依赖
+
+| 依赖 | 来源 | 用途 |
+|-----|-----|-----|
+| OpenClaw session JSONL | 外部 | Token 统计数据源 |
+| `~/.openclaw/agents/main/sessions/*.jsonl` | OpenClaw | 模型调用记录 |
+
+#### 10.7.3 性能考量
+
+| 特性 | 性能影响 | 优化策略 |
+|-----|---------|---------|
+| Proactive 推荐 | 每次 status/init +1 HTTP 调用 | 仅 helpful 模式触发，minimal/silent 跳过 |
+| Token 统计 | 首次读取需遍历 JSONL | 缓存 1 小时，仅 today/week 缓存 |
+| Contextual 推荐 | 端点切换，参数增加 | 失败自动 fallback 到普通 feed |
+
+---
+
+### 10.8 实现清单
+
+#### 10.8.1 代码改动顺序
+
+```bash
+# Phase 2 改动（建议顺序）
+
+# F1: Proactive Mode
+1. scripts/lib/core.js      → PROACTIVE_MODES, readProactiveMode, shouldShowRecommendations
+2. scripts/lib/misc.js      → handleProfile("set") 支持 --proactive-mode
+3. scripts/lib/skills.js    → handleInit/handleStatus 推荐逻辑
+
+# F2: Token Transparency
+4. scripts/lib/token.js     → 新建模块，handleStatsToken
+5. scripts/shell.js         → stats token 命令路由
+
+# F3: Contextual Recommendations
+6. scripts/lib/http.js      → ALLOWED_ENDPOINTS 新增 contextual
+7. scripts/lib/recommend.js → handleRecommend --contextual 分支
+8. scripts/lib/radar.js     → contextual 端点选择
+```
+
+#### 10.8.2 测试验证
+
+| 测试项 | 命令 | 预期结果 |
+|-------|-----|---------|
+| Proactive mode 设置 | `profile set --proactive-mode=minimal` | `proactive_mode: minimal` |
+| Status 推荐控制 | `status` (minimal 模式) | 无 `suggest_recommend` 字段 |
+| Status 推荐显示 | `status` (helpful 模式) | `suggest_recommend: true` + recommendations |
+| Token 统计 today | `stats token today` | `total_tokens, by_model` |
+| Token 统计 week | `stats token week` | 缓存生效，返回 cached: true |
+| Contextual 推荐 | `recommend --contextual` | `endpoint_used: /recommendations/contextual` |
+| 端点 allowlist | `recommend --contextual` | 无 `endpoint_not_allowed` 错误 |
+
+---
+
+### 10.9 后端需求
+
+| 端点 | Phase 2 需求 | 状态 |
+|-----|-------------|------|
+| `GET /recommendations/contextual` | **新增** | 需后端支持 |
+| `GET /recommendations/feed` | 已存在 | **复用** |
+
+**新增端点参数**：
+
+```
+GET /recommendations/contextual
+  ?limit=5
+  &profileTags=rust,typescript
+  &recentSkills=code-review,git-helper
+  &installedCount=12
+  &contextual=1
+```
+
+---
+
+### 10.10 总结
+
+Phase 2 升级聚焦于增强用户体验与透明度：
+
+| Feature | 关键改动 | 预期收益 |
+|--------|---------|---------|
+| **F1: Proactive Mode** | CONFIG.md 新增配置，status/init 推荐控制 | 用户可控制推荐主动性 |
+| **F2: Token Transparency** | 新增 token.js，解析 session JSONL | 用户可查看 API 使用情况 |
+| **F3: Contextual Recommendations** | `--contextual` flag，新端点 | 推荐更精准，基于上下文匹配 |
+
+**技术栈**：
+- Node.js 22.14+ (ES5/CommonJS)
+- OpenClaw Session JSONL（外部数据源）
+- Cache TTL 1 hour（Token 统计）
+
+**风险控制**：
+- Silence-first fallback（推荐获取失败不报错）
+- Endpoint allowlist（新端点必须声明）
+- 缓存失效自动重建（Token 统计）
+
+---
+
+*Phase 2 架构方案编写完毕，可进入代码实现阶段。*
