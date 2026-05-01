@@ -3,6 +3,7 @@
 const {
   OUT_ARR, VALID_TRACK_ACTIONS,
   readCache, writeCache,
+  resolveCanonicalSlug,
 } = require("./core");
 const { httpCall, apiCall, missingArg } = require("./http");
 
@@ -233,9 +234,15 @@ async function handleRecommend(args, ctx) {
   }
   const resp = await httpCall("GET", url);
   if (resp.error) return resp;
+  const rawItems = resp.items || resp.recommendations || [];
+  // Normalize slugs: backend may return skillssh: URLs or org/repo/name paths
+  const items = rawItems.map((item) => ({
+    ...item,
+    slug: resolveCanonicalSlug(item.slug || item.id || item.name || ""),
+  }));
   const result = {
     intent: "recommend",
-    items: resp.items || resp.recommendations || [],
+    items,
     withProfile,
   };
   writeCache(cacheKey, { items: result.items });
@@ -269,7 +276,12 @@ async function handleSearch(args) {
     `/skills/live-search?query=${encodeURIComponent(query)}&limit=${searchLimit}`,
   );
   if (searchResp.error) return searchResp;
-  const items = searchResp.results || searchResp.items || [];
+  const rawItems = searchResp.results || searchResp.items || [];
+  // Normalize slugs: backend may return skillssh: URLs or org/repo/name paths
+  const items = rawItems.map((item) => ({
+    ...item,
+    slug: resolveCanonicalSlug(item.slug || item.id || item.name || ""),
+  }));
   return {
     intent: "search",
     items,

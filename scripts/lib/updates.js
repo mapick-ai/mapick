@@ -247,14 +247,18 @@ function handleNotifyPlan() {
     after_success_track: "node scripts/shell.js notify:track setup_complete",
     after_failure_rollback: null,
     delivery:
-      "IMPORTANT: cron delivery requires a configured channel (Telegram, Slack, etc.). In local-only setups without a channel, the cron will execute but notifications cannot reach you. The --best-effort-deliver flag ensures the cron does not block on delivery failures, but you need at least one active channel for notifications to be received. Verify with `openclaw cron list --json` after setup — look for deliveryPreviews with a valid route.",
+      "IMPORTANT: cron delivery requires a configured channel (Telegram, Slack, etc.). In local-only setups without a channel, the cron will execute but notifications cannot reach you. The --best-effort-deliver flag ensures the cron does not block on delivery failures, but you need at least one active channel for notifications to be received. Verify with `openclaw cron list --json` after setup — look for deliveryPreviews with a valid route. Additionally, run `openclaw chat list` to confirm at least one chat session is linked to the channel (e.g., `telegram:your-bot` or `slack:your-channel`).",
     verification: {
       command: "openclaw cron list --json",
       success_condition:
         "Find the mapick-notify job and confirm its deliveryPreviews entry does not contain `no route`, `fail-closed`, or an empty route.",
       failure_message:
-        "Cron was created, but delivery is not reachable yet. Configure a channel/route before claiming daily notifications are fully set up.",
+        "Cron was created, but delivery is not reachable yet. Configure a channel/route before claiming daily notifications are fully set up. Run `openclaw chat list` to verify linked chat sessions.",
       must_not_claim_success_until_delivery_valid: true,
+      extra_check: {
+        command: "openclaw chat list --json",
+        hint: "At least one chat session should be linked to a channel (e.g., telegram or slack integration).",
+      },
     },
   };
 }

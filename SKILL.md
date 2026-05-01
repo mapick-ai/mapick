@@ -56,12 +56,19 @@ On user pick: **resolve the canonical slug** (see Install command rule below) an
 
 ### Install command rule (STRICT)
 
-Always render: `openclaw skills install <slug>`. Slug resolution:
-1. Prefer `slug` or canonical short `skillId` (e.g. `code-review`).
-2. Fall back to last segment of `skillssh:org/repo/skill` (e.g. `skillssh:soultrace-ai/soultrace-skill/soultrace` → `soultrace`).
-3. If neither yields a clean short name, refuse and surface the raw identifier.
+Always render: `openclaw skills install <slug>`. Slug resolution uses **resolveCanonicalSlug**:
 
-NEVER show or run: raw `installCommands[].command`, `skillssh:` prefixes, full `org/repo/skill` paths, `npx @mapick/install`, or `clawhub install skillssh:...`. Applies to **both** recommendation install and bundle install.
+**resolveCanonicalSlug(input) → slug:**
+1. If input has `slug` field → use it directly.
+2. If input has `skillId` with no path separators → use it (e.g. `code-review`).
+3. If input has `skillssh:org/repo/skill` format → extract last segment (e.g. `skillssh:soultrace-ai/soultrace-skill/soultrace` → `soultrace`).
+4. If neither yields a clean short name → refuse and surface the raw identifier.
+
+**Applies to:**
+- `/mapick recommend` → on user pick, resolve from `items[].skillId` or `items[].slug`.
+- `/mapick bundle:install <id>` → resolve each entry in `installCommands[]` before running.
+
+NEVER show or run: raw `installCommands[].command`, `skillssh:` prefixes, full `org/repo/skill` paths, `npx @mapick/install`, or `clawhub install skillssh:...`.
 
 ### Rendering: recommend / search
 
@@ -440,6 +447,22 @@ NEVER auto-confirm. NEVER omit the `what_it_doesnt` line.
 
    Do NOT report a clean "all set" without this check passing. Otherwise, reply with one-line confirmation.
 
+5. **Delivery route verification (post-install check):** For `notify:plan` success path, explicitly guide the user when delivery is not set up:
+   - Run `openclaw chat list --json` after cron registration
+   - If `channels` array is empty or missing, show:
+     ```
+     ⚠️ 通知渠道未配置
+     
+     定时任务已创建，但没有投递目标。请选择：
+     
+     1. 添加 Telegram 频道 → `openclaw chat add --telegram <chat_id>`
+     2. 添加 Slack 频道 → `openclaw chat add --slack <channel_id>`
+     3. 暂时跳过 → 稍后运行 `/mapick notify:plan` 重新设置
+     
+     没有投递渠道，通知将无法送达。
+     ```
+   - If `channels` array has entries, show success with channel name: "✅ 每日提醒已启用，将投递到: {channel_name}"
+
 ### Settings
 
 - `node scripts/shell.js update:settings off` — disable detection entirely.
@@ -619,26 +642,28 @@ Full 6-step flow: `reference/flows.md#first-run-summary`.
 
 User-facing:
 
-| Command                  | Purpose                                              |
-| ------------------------ | ---------------------------------------------------- |
-| `/mapick`                | Status overview (alias for `status`)                 |
-| `/mapick status`         | Detailed skill status                                |
-| `/mapick scan`           | Force re-scan                                        |
-| `/mapick clean`          | List zombies, pick which to remove                   |
-| `/mapick recommend`      | Recommendations                                      |
-| `/mapick search <kw>`    | Search skills                                        |
-| `/mapick intent <desc>`  | Natural language → local keywords → search (privacy-first) |
-| `/mapick bundle`         | Browse / install bundles                             |
-| `/mapick security <id>`  | Safety check                                         |
-| `/mapick report`         | Persona report                                       |
-| `/mapick privacy <sub>`  | status / trust / untrust / delete-all / consent-*    |
-| `/mapick workflow`       | Frequent sequences                                   |
-| `/mapick daily`          | Daily digest                                         |
-| `/mapick weekly`         | Weekly summary                                       |
-| `/mapick stats`          | Global & personal stats (installs, conversions)      |
-| `/mapick radar`          | Daily gap radar (silent when nothing to report)      |
-| `/mapick profile clear`  | Reset workflow profile + retrigger first-run summary |
-| `/mapick diagnose`       | Show loaded version/path and workspace shadow risks  |
+| Command                  | Purpose                                              | Trigger phrases (any language) |
+| ------------------------ | ---------------------------------------------------- | ------------------------------ |
+| `/mapick`                | Status overview (alias for `status`)                 | status, overview, dashboard, my skills |
+| `/mapick status`         | Detailed skill status                                | how am I doing, 技能状态 |
+| `/mapick scan`           | Force re-scan                                        | rescan, refresh skills |
+| `/mapick clean`          | List zombies, pick which to remove                   | zombies, dead skills, 清理 |
+| `/mapick recommend`      | Recommendations                                      | suggest skills, 缺什么, what should I install |
+| `/mapick search <kw>`    | Search skills                                        | find skill, 搜一下 |
+| `/mapick intent <desc>`  | Natural language → local keywords → search           | I need X, 有没有 Y 的工具, 帮我找 |
+| `/mapick bundle`         | Browse / install bundles                             | workflow pack, skill pack, 技能包 |
+| `/mapick security <id>`  | Safety check                                         | is X safe, security score, trust, 安全吗 |
+| `/mapick report`         | Persona report                                       | analyze me, my persona, developer type |
+| `/mapick privacy <sub>`  | status / trust / untrust / delete-all / consent-*    | privacy, 隐私, 数据保护 |
+| `/mapick workflow`       | Frequent sequences                                   | routine, pipeline, skill chain |
+| `/mapick daily`          | Daily digest                                         | today, yesterday, 今日摘要 |
+| `/mapick weekly`         | Weekly summary                                       | this week, last week, 周报 |
+| `/mapick stats`          | Global & personal stats (installs, conversions)      | statistics, 数据统计 |
+| `/mapick radar`          | Daily gap radar (silent when nothing to report)      | radar, 雷达, 机会 |
+| `/mapick profile clear`  | Reset workflow profile + retrigger first-run summary | reset profile, 重置配置 |
+| `/mapick diagnose`       | Show loaded version/path and workspace shadow risks  | version, loaded path, 诊断, 版本信息 |
+| `/mapick install`        | Run install.sh (Phase 1 setup)                      | install mapick, 安装 mapick, set up mapick, 配置 mapick |
+| `/mapick diagnose --install-check` | Verify installation status                 | is mapick installed, 检查安装, verify setup |
 
 Internal (AI invokes; users don't type):
 `clean:track <skillId>` · `bundle:track-installed <id>` · `summary` · `profile set/get` · `first-run-done` · `recommend --with-profile` · `recommend:track <recId> <skillId> installed` · `security:report` · `notify` · `share <reportId> <htmlFile> [locale]`

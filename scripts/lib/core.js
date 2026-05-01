@@ -235,6 +235,41 @@ function readInstalledVersion() {
   return null;
 }
 
+// Resolve a skill slug from various input formats.
+// Handles: bare names, skillssh: URLs, clawhub: URLs, org/repo/name paths.
+// Returns a clean slug suitable for `openclaw skills install`.
+function resolveCanonicalSlug(raw) {
+  if (!raw || typeof raw !== "string") return raw;
+  const s = raw.trim();
+  if (!s) return s;
+
+  // 1. Pure short name (alphanumeric, underscore, hyphen) → return directly
+  if (/^[a-zA-Z0-9_-]+$/.test(s)) return s;
+
+  // 2. skillssh: prefix → extract last segment
+  if (s.startsWith("skillssh:")) {
+    const parts = s.split("/");
+    return parts[parts.length - 1] || s;
+  }
+
+  // 3. clawhub: prefix → extract slug after the prefix
+  if (s.startsWith("clawhub:")) {
+    const rest = s.slice(8); // "clawhub:" length
+    // clawhub:org/slug or clawhub:slug
+    const parts = rest.split("/");
+    return parts[parts.length - 1] || rest;
+  }
+
+  // 4. org/repo/name or org/name format → extract name
+  const slashParts = s.split("/");
+  if (slashParts.length >= 2) {
+    return slashParts[slashParts.length - 1];
+  }
+
+  // 5. Fallback → return original
+  return s;
+}
+
 function redactForUpload(text) {
   if (!text) return { ok: false, error: "empty_upload" };
   const config = readConfig();
@@ -257,5 +292,6 @@ module.exports = {
   VALID_TRACK_ACTIONS, VALID_EVENT_ACTIONS, PROTECTED_SKILLS, REMOTE_COMMANDS,
   stableHash16, isoNow, clampOutput, parseFrontmatter, extractProfileTags,
   readConfig, writeConfig, deleteConfig, readCache, writeCache, deviceFp,
-  isProtected, isConsentDeclined, validateSkillId, redactForUpload, readInstalledVersion,
+  isProtected, isConsentDeclined, validateSkillId, resolveCanonicalSlug,
+  redactForUpload, readInstalledVersion,
 };

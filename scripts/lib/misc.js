@@ -7,7 +7,7 @@ const {
   CONFIG_DIR, OUT_ARR, VALID_EVENT_ACTIONS,
   isoNow, extractProfileTags, redactForUpload,
   readConfig, writeConfig, deleteConfig,
-  isConsentDeclined, readInstalledVersion,
+  isConsentDeclined, readInstalledVersion, resolveCanonicalSlug,
 } = require("./core");
 const { httpCall, apiCall, missingArg } = require("./http");
 
@@ -102,6 +102,26 @@ async function handleBundle(args, ctx) {
       "bundle:install",
     );
     r.bundleId = args[1];
+    // Normalize install command slugs: backend may return skillssh: URLs or org/repo/name
+    if (r.installCommands && Array.isArray(r.installCommands)) {
+      r.installCommands = r.installCommands.map((cmd) => {
+        // Command is typically "openclaw skills install <slug>"
+        // Extract the slug part and normalize it
+        const parts = (cmd.command || cmd || "").split(" ");
+        const slugIdx = parts.findIndex((p) => p === "install") + 1;
+        if (slugIdx > 0 && slugIdx < parts.length) {
+          const rawSlug = parts[slugIdx];
+          const cleanSlug = resolveCanonicalSlug(rawSlug);
+          parts[slugIdx] = cleanSlug;
+          return {
+            ...cmd,
+            command: parts.join(" "),
+            normalized_slug: cleanSlug,
+          };
+        }
+        return cmd;
+      });
+    }
     return r;
   }
   if (sub === "track-installed" && args[1]) {

@@ -449,6 +449,56 @@ fi
 
 ok "Installed at ${target_dir}"
 
+# -- Post-install verification -------------------------------------------------
+# Three-step verification to ensure the install is functional before claiming success.
+
+echo ""
+dim_echo "────────────────────────────────────────"
+echo ""
+info "Running post-install verification..."
+
+# Step 1: File integrity check (SKILL.md + shell.js exist)
+json_event verify step="1" kind="file_integrity" status="running"
+if [[ ! -f "${target_dir}/SKILL.md" ]]; then
+  json_event verify step="1" kind="file_integrity" status="failed" missing="SKILL.md"
+  rollback
+  error "Verification failed — SKILL.md missing in ${target_dir}. Rolled back."
+fi
+if [[ ! -f "${target_dir}/scripts/shell.js" ]]; then
+  json_event verify step="1" kind="file_integrity" status="failed" missing="scripts/shell.js"
+  rollback
+  error "Verification failed — scripts/shell.js missing in ${target_dir}. Rolled back."
+fi
+json_event verify step="1" kind="file_integrity" status="passed"
+ok "Step 1/3: File integrity check passed"
+
+# Step 2: init scan (call node scripts/shell.js init)
+json_event verify step="2" kind="init_scan" status="running"
+if ! node "${target_dir}/scripts/shell.js" init 2>/dev/null; then
+  json_event verify step="2" kind="init_scan" status="failed"
+  warn "Step 2/3: init scan had issues (non-critical, continuing)"
+else
+  json_event verify step="2" kind="init_scan" status="passed"
+  ok "Step 2/3: init scan completed"
+fi
+
+# Step 3: Environment check (Node.js version)
+json_event verify step="3" kind="env_check" status="running"
+NODE_CHECK_VER="$(node --version)"
+NODE_CHECK_MAJOR="$(echo "${NODE_CHECK_VER}" | sed 's/^v\([0-9]*\).*/\1/')"
+NODE_CHECK_MINOR="$(echo "${NODE_CHECK_VER}" | sed 's/^v[0-9]*\.\([0-9]*\).*/\1/')"
+if ! [[ "${NODE_CHECK_MAJOR}" =~ ^[0-9]+$ ]] \
+   || (( NODE_CHECK_MAJOR < 22 )) \
+   || { (( NODE_CHECK_MAJOR == 22 )) && (( NODE_CHECK_MINOR < 14 )); }; then
+  json_event verify step="3" kind="env_check" status="failed" node_version="${NODE_CHECK_VER}"
+  warn "Step 3/3: Node.js ${NODE_CHECK_VER} is below recommended 22.14 (may affect functionality)"
+else
+  json_event verify step="3" kind="env_check" status="passed" node_version="${NODE_CHECK_VER}"
+  ok "Step 3/3: Node.js ${NODE_CHECK_VER} meets baseline"
+fi
+
+json_event verify status="complete" target="${target_dir}"
+
 # -- Trim backups (keep most recent N) -----------------------------------------
 
 if [[ "${BACKUP_KEEP}" =~ ^[0-9]+$ ]] && (( BACKUP_KEEP > 0 )); then

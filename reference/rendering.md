@@ -159,6 +159,101 @@ When user replies:
 
 No JSON echo. No "your daily Mapick check found:" preamble. No timestamps, no run-id.
 
+## notify:plan (delivery verification)
+
+**Success with delivery route configured:**
+```
+✅ 每日提醒已启用
+
+检查时间：{checkedAt}
+投递渠道：{channel_name}
+下次运行：{next_run_time}
+
+管理提醒：/mapick notify:status
+```
+
+**Success but no delivery route:**
+```
+⚠️ 定时任务已创建，但没有投递目标
+
+Mapick 会每天检查更新和僵尸 Skill，但无法通知你。
+
+请选择投递渠道：
+1. Telegram → openclaw chat add --telegram <chat_id>
+2. Slack    → openclaw chat add --slack <channel_id>
+3. 暂时跳过 → 稍后运行 /mapick notify:plan 重新设置
+
+没有投递渠道，通知将无法送达。
+```
+
+**Verification steps after `notify:plan` success:**
+1. Run `openclaw chat list --json`
+2. Check if `channels` array is non-empty
+3. If empty → render the "no delivery route" template above
+4. If non-empty → show channel name(s) in success message
+
+**Failure during setup:**
+```
+❌ 设置失败
+
+{error_message}
+
+常见问题：
+• cron 权限不足 → 检查 OpenClaw 配置
+• 网络问题 → 重试 /mapick notify:plan
+
+详细诊断：/mapick diagnose
+```
+
+## install.sh (post-install status)
+
+**After running install.sh successfully:**
+```
+✅ Mapick 安装完成
+
+版本：{version}
+路径：{install_path}
+Node：{node_version}
+
+下一步：
+• /mapick status     → 查看技能状态
+• /mapick recommend  → 发现缺失的 Skill
+• /mapick privacy status → 检查隐私设置
+
+遇到问题？运行 /mapick diagnose 检查环境。
+```
+
+**Installation check (diagnose --install-check):**
+```
+🔍 Mapick 安装状态
+
+✅ 已安装
+   版本：{version}
+   路径：{install_path}
+   Node：{node_version}
+   配置：{config_status}
+
+{issues}
+
+{recommendations}
+```
+
+**When issues found:**
+- `issues` array: list each issue with ⚠️ prefix
+- `recommendations` array: actionable fix for each issue
+
+**When not installed:**
+```
+❌ Mapick 未安装
+
+请运行安装脚本：
+curl -fsSL https://get.mapick.ai/install.sh | bash
+
+或手动安装：
+git clone https://github.com/mapick/mapick.git ~/.openclaw/skills/mapick
+cd ~/.openclaw/skills/mapick && pnpm install
+```
+
 ## summary card
 
 ```

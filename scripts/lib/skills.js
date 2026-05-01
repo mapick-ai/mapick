@@ -93,7 +93,46 @@ function countRedactRules() {
 }
 
 function registerNotifyCron() {
-  return { registered: false, reason: "cron_registration_disabled_in_scan_safe_build" };
+  // Return structured notify:plan JSON for AI to execute via openclaw cron add.
+  // Zero-subprocess: Mapick does NOT spawn child processes; AI runs the commands.
+  return {
+    intent: "notify_cron:register_plan",
+    target: "mapick-notify",
+    purpose: "Daily 9am check for version updates + zombie skills",
+    commands: [
+      {
+        step: 1,
+        kind: "instruction",
+        instruction:
+          "Run `openclaw cron list --json`. Parse the JSON. For EACH entry whose `name` starts with `mapick-notify` or equals `mapick-daily-notify`, run `openclaw cron rm <id>` (using the entry's `id` field). This MUST be by ID — `openclaw cron rm mapick-notify` (by name) silently no-ops. If there are no matching entries, do nothing and continue.",
+        rationale:
+          "Idempotent: removes any pre-existing mapick cron entries (both `mapick-notify` and legacy `mapick-daily-notify`) before adding a fresh one, so re-running the plan does not accumulate duplicates.",
+        optional: true,
+      },
+      {
+        step: 2,
+        kind: "command",
+        command:
+          'openclaw cron add --name mapick-notify --cron "0 9 * * *" --session isolated --message "Run /mapick notify" --best-effort-deliver --timeout-seconds 120',
+        optional: false,
+        rationale: "Schedule the daily check",
+      },
+    ],
+    what_it_does:
+      "Each day at 9am OpenClaw fires the message 'Run /mapick notify'. Your agent sees that, calls /mapick notify, which queries api.mapick.ai/notify/daily-check for any version alerts or zombie warnings.",
+    stops:
+      "Run `node scripts/shell.js notify:disable` to get the by-id removal plan.",
+    after_success_track: "node scripts/shell.js notify:track setup_complete",
+    delivery:
+      "Cron delivery requires a configured channel (Telegram, Slack, etc.). In local-only setups without a channel, the cron will execute but notifications cannot reach you. Verify with `openclaw cron list --json` after setup.",
+    verification: {
+      command: "openclaw cron list --json",
+      success_condition:
+        "Find the mapick-notify job and confirm it exists with the expected schedule.",
+      failure_message:
+        "Cron entry not found. Re-run the notify:plan commands.",
+    },
+  };
 }
 
 async function aggregateSummary(skills, config) {
@@ -274,6 +313,15 @@ async function handleStatus(_args, ctx) {
   const fresh = readConfig();
   fresh.device_fp = fresh.device_fp || ctx.fp;
 
+  // Detect workspace shadow: if a workspace copy shadows managed mapick
+  const home = process.env.HOME || "";
+  const managedSkillFile = path.join(home, ".openclaw", "skills", "mapick", "SKILL.md");
+  const workspaceDuplicate = path.join(home, ".openclaw", "workspace", "skills", "mapick");
+  const workspaceSkillFile = path.join(workspaceDuplicate, "SKILL.md");
+  const managedExists = fs.existsSync(managedSkillFile);
+  const workspaceExists = fs.existsSync(workspaceSkillFile);
+  const workspaceShadow = managedExists && workspaceExists;
+
   // Welcome card — trigger once if never shown
   if (!fresh.first_welcome_shown && fresh.device_fp) {
     writeConfig("first_welcome_shown", "true");
@@ -285,10 +333,15 @@ async function handleStatus(_args, ctx) {
       activation_rate: summary.activation_rate,
       zombie_count: summary.zombie_count,
       taste_tags: summary.taste_tags,
+      workspace_shadow: workspaceShadow,
+      workspace_shadow_path: workspaceShadow ? workspaceDuplicate : null,
     };
   }
 
-  return aggregateSummary(skills, fresh);
+  const summary = await aggregateSummary(skills, fresh);
+  summary.workspace_shadow = workspaceShadow;
+  summary.workspace_shadow_path = workspaceShadow ? workspaceDuplicate : null;
+  return summary;
 }
 
 function handleScan() {
