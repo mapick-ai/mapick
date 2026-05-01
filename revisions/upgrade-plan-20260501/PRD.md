@@ -1,25 +1,36 @@
-# Mapick v0.0.16 Phase 2 — 个性化与智能化 PRD
+# Mapick v0.0.17 Phase 2 & Phase 3 — 个性化与智能化 PRD
 
-**版本**：1.0  
+**版本**：1.2  
 **日期**：2026-05-01  
 **状态**：Draft  
 **作者**：Mapick Product Team  
-**来源**：Phase 2 升级计划 (`revisions/upgrade-plan-20260501/README.md`) + V1.5 三大功能开发文档 (`revisions/slack-02/`)  
+**来源**：Phase 2 升级计划 (`revisions/upgrade-plan-20260501/README.md`) + V1.5 三大功能开发文档 (`revisions/slack-02/`) + Phase 3 规划  
 **前置**：Phase 1 完成（notify cron、install verification、slug resolution）
 
 ---
 
 ## 目录
 
+### Phase 2
 1. [产品目标与范围](#1-产品目标与范围)
-2. [需求 4：用户偏好 — Proactive Mode](#2-需求-4用户偏好--proactive-mode)
-3. [需求 5：Token 透明化](#3-需求-5token-透明化)
-4. [需求 6：推荐引擎增强](#4-需求-6推荐引擎增强)
+2. [需求 4：用户偏好 — Proactive Mode](#2-需求4用户偏好--proactive-mode)
+3. [需求 5：Token 透明化](#3-需求5token-透明化)
+4. [需求 6：推荐引擎增强](#4-需求6推荐引擎增强)
 5. [优先级排序](#5-优先级排序)
 6. [API 依赖映射](#6-api-依赖映射)
 7. [非功能需求](#7-非功能需求)
 8. [风险与依赖](#8-风险与依赖)
 9. [附录](#9-附录)
+
+### Phase 3
+10. [Phase 3 产品目标与范围](#10-phase-3-产品目标与范围)
+11. [需求 7：Stats Dashboard 增强](#11-需求-7stats-dashboard-增强)
+12. [需求 8：Perception 集成](#12-需求-8perception-集成)
+13. [Phase 3 优先级排序](#13-phase-3-优先级排序)
+14. [Phase 3 API 依赖映射](#14-phase-3-api-依赖映射)
+15. [Phase 3 非功能需求](#15-phase-3-非功能需求)
+16. [Phase 3 风险与依赖](#16-phase-3-风险与依赖)
+17. [Phase 3 附录](#17-phase-3-附录)
 
 ---
 
@@ -900,8 +911,1019 @@ Phase 1 (P0 — 已完成)          Phase 2 (P1 — 本次)           Phase 3 (P
 | 日期 | 版本 | 变更 |
 |------|:---:|------|
 | 2026-05-01 | 1.0 | 初始版本，覆盖 Phase 2 三个 P1 需求：G4 用户偏好、G5 Token 透明化、G6 推荐引擎增强 |
+| 2026-05-01 | 1.2 | 追加 Phase 3：G7 Stats Dashboard 增强、G8 Perception 集成 |
 
 ---
 
 *文档状态：Draft → 待评审 → 评审通过后进入开发排期*
-*Phase 2 预计总工时：4-5 天*
+*Phase 2 预计总工时：4-5 天 | Phase 3 预计总工时：3-4 天*
+
+---
+
+---
+
+# Phase 3 — 数据洞察与感知闭环
+
+---
+
+## 10. Phase 3 产品目标与范围
+
+### 10.1 背景
+
+Phase 2 完成了三个核心能力：用户偏好控制（G4）、Token 透明化（G5）、个性化推荐（G6）。Mapick 已经能够理解用户偏好、追踪 AI 成本、基于上下文做精准推荐。
+
+**但数据通路仍未闭环**：
+
+- **用户看不到自己的使用全貌**：Phase 2 的 `stats token` 只展示了 AI token 消耗，但用户不知道总共安装了多少 skill、推荐转化率如何、活跃天数等宏观指标
+- **推荐系统的反馈回路缺失**：Mapick 推荐了 skill，但不知道用户是否点击、是否安装、推荐准确率如何。没有反馈，推荐算法无法自我优化
+- **感知系统（Perception）虽然已有后端端点但从未被客户端使用**，导致推荐精准度的后验分析处于黑盒状态
+
+Phase 3 聚焦**数据洞察与感知闭环**，让 Mapick 从一个「会推荐的工具」进化为一个「自我感知、持续优化的系统」。
+
+### 10.2 产品目标
+
+**一句话**：让用户看见自己的 Mapick 使用全貌，并让推荐系统拥有自我感知和反馈能力。
+
+具体目标：
+
+| 目标 | 当前状态 | 目标状态 |
+|------|---------|---------|
+| G7 Stats Dashboard 增强 | 仅有本地 `stats token`（token 消耗），无后端 stats 端点 | `stats --detail` 展示个人使用全貌（事件总量、推荐转化率、活跃天数、安装趋势、top skills）；Dashboard AI 渲染卡片升级 |
+| G8 Perception 集成 | 后端 `/perception/accuracy-trend` 和 `/perception/summary` 已实现但从未被客户端调用 | Stats 中展示推荐准确率趋势；Daily digest 中展示感知摘要 |
+
+### 10.3 范围（In/Out）
+
+**In Scope（本次 Phase 3）**：
+
+- **G7 Stats Dashboard 增强**：
+  - 新后端端点 `GET /stats/user/:userId`，返回个人 stats 全貌
+  - 客户端 `stats --detail` CLI flag，调用新端点
+  - Dashboard AI 渲染升级：合并本地 token stats + 后端 user stats，输出完整报告
+  - 推荐漏斗可视化（曝光 → 点击 → 安装 → 活跃使用）
+- **G8 Perception 集成**：
+  - 客户端接入 `GET /perception/accuracy-trend`，在 stats 中展示推荐准确率趋势
+  - 客户端接入 `GET /perception/summary`，在每日 digest 中展示感知摘要
+  - AI 渲染规则：感知数据的人类可读解释
+  - 降级策略：perception 端点不可用时不影响核心 stats 功能
+
+**Out Scope（后续 Phase）**：
+
+- 社交图谱 M5（Phase 4）
+- 开发者 API M7（Phase 4）
+- AI 模型路由 M8（Phase 4）
+- Cost optimization（Phase 4，依赖 Phase 3 数据基础）
+- Perception 后端算法调优（算法本身由后端团队负责，客户端仅做数据接入和展示）
+- 推荐系统的实时反馈闭环（本次仅展示后验数据，不做实时调参）
+
+### 10.4 后端依赖总览
+
+| 需求 | 后端依赖 | 是否新增 |
+|------|---------|:-------:|
+| G7 Stats Dashboard | `GET /stats/user/:userId` | **新增（需后端开发）** |
+| G8 Perception 集成 | `GET /perception/accuracy-trend`（已存在） | 复用现有端点 |
+| G8 Perception 集成 | `GET /perception/summary`（已存在） | 复用现有端点 |
+
+### 10.5 与 Phase 2 的关系
+
+```
+Phase 2 产出                           Phase 3 增强
+────────────────────────────────────────────────────────────
+G5 stats token (本地)         ───→    G7 stats --detail (本地 + 后端融合)
+G6 contextual 推荐             ───→    G8 推荐准确率展示（推荐反馈闭环）
+G4 proactive_mode (helpful)   ───→    G8 daily digest 中的感知摘要
+```
+
+---
+
+## 11. 需求 7：Stats Dashboard 增强
+
+### 11.1 问题描述
+
+Phase 2 引入的 `stats token` 命令只展示了 AI token 消耗视角——用户能看到每个 skill 烧了多少 token、预估花了多少钱。但这只是使用全景中的一个切片。
+
+用户缺失的视角：
+
+- **我到底在 Mapick 上有多活跃？** 活跃天数、总事件量
+- **推荐对我有用吗？** 看了多少推荐？点了多少？装了多少？转化率是多少？
+- **我最依赖哪些 skill？** Top skills 排名
+- **我的 skill 增长趋势如何？** 每周装了多少新 skill？是在持续探索还是停滞了？
+
+这些数据后端已在 `/events/track` 中收集，但从未聚合返回给用户。Stats dashboard 需要从「token 会计」升级为「使用全景仪表盘」。
+
+### 11.2 功能描述
+
+#### F7.1：新后端端点 `GET /stats/user/:userId`
+
+后端新增一个聚合 endpoint，返回指定用户的个人统计数据。
+
+**端点定义**：
+
+| 属性 | 值 |
+|------|-----|
+| **路径** | `GET /api/v1/stats/user/:userId` |
+| **方法** | `GET` |
+| **认证** | Device FP（via `x-device-fp` header），userId 必须与 device FP 关联的用户一致 |
+| **查询参数** | `period`（可选，`7d` / `30d` / `90d`，默认 `30d`）、`includeTrend`（可选，`true`/`false`，默认 `true`） |
+| **成功响应** | `200 OK`，JSON body（见下方 schema） |
+| **错误响应** | `401` 未认证；`403` userId 不匹配；`404` 用户不存在；`500` 服务端错误 |
+
+**响应 Schema**：
+
+```json
+{
+  "userId": "a1b2c3d4e5f6g7h8",
+  "period": {
+    "from": "2026-04-01T00:00:00Z",
+    "to": "2026-05-01T00:00:00Z",
+    "days": 30
+  },
+  "stats": {
+    "eventsTotal": 1520,
+    "eventsByType": {
+      "search": 320,
+      "recommend_view": 340,
+      "recommend_click": 85,
+      "recommend_install": 42,
+      "install": 68,
+      "uninstall": 12,
+      "radar_trigger": 28,
+      "consent_grant": 5,
+      "mode_switch": 3
+    },
+    "recommendShown": 340,
+    "recommendClicked": 85,
+    "recommendInstalled": 42,
+    "conversionRate": {
+      "click_through": 0.25,
+      "install_rate": 0.494,
+      "overall": 0.124
+    },
+    "activeDays": 28,
+    "activeDaysRatio": 0.933,
+    "topSkills": [
+      { "slug": "github-ops", "name": "GitHub Operations", "interactions": 245, "category": "dev-tools" },
+      { "slug": "code-review", "name": "AI Code Review", "interactions": 189, "category": "security-qa" },
+      { "slug": "summarize", "name": "Smart Summarizer", "interactions": 156, "category": "productivity" },
+      { "slug": "docker-manage", "name": "Docker Manager", "interactions": 98, "category": "dev-tools" },
+      { "slug": "csv-converter", "name": "CSV Converter", "interactions": 72, "category": "data-science" }
+    ],
+    "installTrend": [
+      { "week": "2026-W13", "count": 3, "cumulative": 15 },
+      { "week": "2026-W14", "count": 5, "cumulative": 20 },
+      { "week": "2026-W15", "count": 2, "cumulative": 22 },
+      { "week": "2026-W16", "count": 4, "cumulative": 26 }
+    ],
+    "categoryDistribution": {
+      "dev-tools": 8,
+      "security-qa": 5,
+      "productivity": 4,
+      "data-science": 3,
+      "frontend": 2,
+      "other": 4
+    }
+  },
+  "generatedAt": "2026-05-01T12:00:00Z"
+}
+```
+
+**字段说明**：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `eventsTotal` | number | 统计周期内所有事件总量 |
+| `eventsByType` | object | 按事件类型拆分（search / recommend_view / recommend_click / recommend_install / install / uninstall / radar_trigger / consent_grant / mode_switch） |
+| `recommendShown` | number | 推荐曝光次数（同 `eventsByType.recommend_view`） |
+| `recommendClicked` | number | 推荐点击次数（同 `eventsByType.recommend_click`） |
+| `recommendInstalled` | number | 推荐带来的安装次数（同 `eventsByType.recommend_install`） |
+| `conversionRate` | object | 推荐转化漏斗：`click_through` = clicked/shown、`install_rate` = installed/clicked、`overall` = installed/shown |
+| `activeDays` | number | 统计周期内有至少 1 个事件的天数 |
+| `activeDaysRatio` | number | activeDays / 周期总天数 |
+| `topSkills` | array | 按 interaction 次数降序排列的 top 5 skills（包含 slug、name、interactions、category） |
+| `installTrend` | array | 按周统计的新增安装趋势（包含 count 和 cumulative） |
+| `categoryDistribution` | object | 当前已安装 skill 的类别分布 |
+
+**与现有 events track 的关系**：
+
+该端点聚合 `POST /events/track` 写入的事件数据，不新增事件采集逻辑。数据来源为后端已有的 events 表。
+
+#### F7.2：`stats --detail` CLI flag
+
+现有 `stats token` 命令扩展，新增 `--detail` flag 触发全景报告：
+
+```bash
+# 仅 token 报告（Phase 2 行为，不变）
+node scripts/shell.js stats token today
+
+# 全景报告（Phase 3 新增）
+node scripts/shell.js stats --detail
+
+# 指定周期
+node scripts/shell.js stats --detail --period 7d
+node scripts/shell.js stats --detail --period 90d
+```
+
+**命令行为**：
+
+- `stats --detail` 触发两路数据获取：
+  1. 本地 token 解析（复用 Phase 2 的 `handleStatsToken` 逻辑）
+  2. 后端 `GET /stats/user/:userId` 请求
+- 两路数据合并后返回统一的 JSON，供 AI 渲染
+- 如果后端请求失败（网络/认证/500），仅返回本地 token 数据 + 后端数据缺失的友好提示
+
+**合并后的返回 JSON 结构**：
+
+```json
+{
+  "intent": "stats:detail",
+  "period": "30d",
+  "from": "2026-04-01T00:00:00Z",
+  "to": "2026-05-01T00:00:00Z",
+  "local": {
+    // Phase 2 的 token 数据（total / by_skill / daily_average / today_vs_average）
+    "tokenReport": { "..." }
+  },
+  "remote": {
+    // F7.1 的后端 stats 数据
+    "userStats": { "..." },
+    "source": "api"
+  },
+  "remoteFallback": false
+}
+```
+
+#### F7.3：Dashboard AI 渲染升级
+
+SKILL.md 中新增 `stats --detail` 的渲染规则（§16），将本地 token 数据 + 后端 user stats 融合为一个完整仪表盘。
+
+**渲染结构**（从上到下）：
+
+```
+┌─────────────────────────────────────────────┐
+│  📊 Mapick 使用全景 — 过去 30 天              │
+│                                             │
+│  👤 活跃天数：28/30（93%）· 总事件：1,520      │
+│                                             │
+│  💰 Token 消耗（简要）                        │
+│     总计 205K tokens · 预估 $0.85            │
+│     top 3: github-ops / code-review / summarize│
+│                                             │
+│  🎯 推荐漏斗                                  │
+│     曝光 340 → 点击 85(25%) → 安装 42(49%)    │
+│     整体转化率：12.4%                          │
+│     📈 高于全平台平均（9.8%）                  │
+│                                             │
+│  ⭐ Top Skills（按使用频次）                    │
+│     1. github-ops        245 次 ██████████   │
+│     2. code-review       189 次 ████████░░   │
+│     3. summarize         156 次 ██████░░░░   │
+│     4. docker-manage      98 次 ████░░░░░░   │
+│     5. csv-converter      72 次 ███░░░░░░░   │
+│                                             │
+│  📈 安装趋势                                  │
+│     W13 ███  3                              │
+│     W14 █████ 5   ▲                         │
+│     W15 ██ 2        ▼                       │
+│     W16 ████ 4        ▲                     │
+│     → 累计 26 个 skill                       │
+│                                             │
+│  🏷️ 类别分布                                 │
+│     dev-tools 8 · security-qa 5 ·           │
+│     productivity 4 · data-science 3 · ...    │
+│                                             │
+│  💡 洞察：你的推荐转化率(12.4%)高于平均。       │
+│     安全类 skill 是你最常安装的类别（占 31%）。 │
+└─────────────────────────────────────────────┘
+```
+
+**渲染规则**（写入 SKILL.md §16）：
+
+1. **Token 部分保持简洁**：在 detail 模式下，token 数据降为简要摘要（总计 + top 3），详细信息仍由 `stats token` 命令提供。
+2. **推荐漏斗必须有**：三个转化率数值 + 平台平均对比（如果后端返回）。
+3. **Top skills 最多 5 个**，用 ASCII bar 表示相对占比。
+4. **安装趋势用 ASCII 柱状图**，标注周环比涨跌（▲▼→）。
+5. **至少一条洞察**：AI 根据数据自动生成（如转化率对比、类别偏好、增长趋势判断）。
+6. **禁止事项**：不输出原始 JSON、不因后端缺失而报错（降级展示本地数据 + 提示）、不在 trend 为 0 时说「增长强劲」（数据驱动，不编造）。
+
+#### F7.4：推荐漏斗可视化
+
+推荐漏斗是 stats dashboard 中最关键的「推荐效果」指标。它回答了用户和管理员共同关心的核心问题：**推荐到底有没有用？**
+
+**漏斗定义**：
+
+```
+推荐曝光 (recommendShown)
+    │
+    │ 点击率 (CTR) = clicked / shown
+    ▼
+推荐点击 (recommendClicked)
+    │
+    │ 安装率 (Install Rate) = installed / clicked
+    ▼
+推荐安装 (recommendInstalled)
+    │
+    │ 整体转化率 (Overall) = installed / shown
+    ▼
+持续使用（后续 Phase 4 扩展：安装后 7 天仍活跃）
+```
+
+**AI 渲染**：
+
+漏斗以文本 + ASCII 箭头呈现，如：
+
+```
+🎯 推荐漏斗（30 天）
+   曝光 340 ──→ 点击 85 (25%) ──→ 安装 42 (49%)
+   整体转化率：12.4%（42/340）
+```
+
+**对比基准**：
+- 后端 `/stats/user/:userId` 可选择性返回 `platformAverageConversionRate`（全平台平均转化率）
+- 如果返回，AI 在渲染时与用户数据对比，输出「高于/低于平均」
+- 如果不返回，只展示绝对值不对比
+
+### 11.3 用户故事
+
+#### US-7.1：用户查看个人使用全貌
+
+> **作为** 安装了 Mapick 超过一周的用户  
+> **我希望** 输入 `/mapick stats --detail` 能看到我的使用全景（活跃天数、总事件、推荐转化率、top skills、安装趋势）  
+> **以便** 我了解自己对 Mapick 的使用深度，判断是否需要调整使用习惯
+
+**优先级**：P1  
+**依赖**：F7.1（后端端点）、F7.2（CLI flag）、F7.3（AI 渲染规则）  
+**预期效果**：用户对 Mapick 价值的感知从「模糊感觉有用」变为「数据证实有用」
+
+#### US-7.2：用户追踪自身 skill 增长趋势
+
+> **作为** 持续探索新 skill 的用户  
+> **我希望** 在 stats 中看到我每周安装 skill 的趋势图  
+> **以便** 我判断自己的探索节奏——是否最近停滞了？是否某个时段装得太多需要消化？
+
+**优先级**：P1  
+**依赖**：F7.1（installTrend）、F7.3  
+**预期效果**：用户对自身 growth 节奏有清晰认知
+
+#### US-7.3：用户理解推荐对自己的价值
+
+> **作为** 收到过多次推荐的用户  
+> **我希望** 看到推荐转化漏斗（曝光 → 点击 → 安装），并与平台平均对比  
+> **以便** 我判断 Mapick 的推荐对我是否精准，以及我是否需要调整 profile 标签来提高推荐质量
+
+**优先级**：P1  
+**依赖**：F7.1（conversionRate）、F7.4（漏斗可视化）  
+**预期效果**：用户行为驱动 profile 优化（更多用户填写准确的 user_profile_tags）
+
+#### US-7.4：后端不可用时仍能查看本地 stats
+
+> **作为** 在网络不稳定环境下的用户  
+> **我希望** `stats --detail` 在后端不可用时仍能展示本地 token 数据，并明确提示后端数据暂时不可用  
+> **以便** 我不会因为网络问题而完全看不到任何 stats
+
+**优先级**：P2  
+**依赖**：F7.2（remoteFallback）  
+**预期效果**：核心功能不受后端可用性影响
+
+### 11.4 验收标准
+
+| # | 验收条件 | 测试方法 |
+|:-:|---------|---------|
+| AC7.1 | `GET /stats/user/:userId` 在有效请求下返回 200，JSON body 符合 schema | curl / Postman 测试 |
+| AC7.2 | `GET /stats/user/:userId` 在 userId 不匹配 device FP 时返回 403 | 用不同 device FP 请求 |
+| AC7.3 | `GET /stats/user/:userId?period=7d` 返回 7 天范围内的数据 | 检查 `period.from`/`period.to` 间隔 |
+| AC7.4 | `stats --detail` CLI 命令成功执行，返回合并后的本地 + 远程 JSON | CLI 测试，检查 JSON 包含 `local` 和 `remote` |
+| AC7.5 | `stats --detail` 在后端不可用时（5xx/超时）`remoteFallback: true`，`remote.userStats` 为 null 或空对象 | 模拟后端故障 |
+| AC7.6 | 推荐转化率 math 正确：`overall` = `recommendInstalled` / `recommendShown` | 手动验算 |
+| AC7.7 | `topSkills` 数组按 `interactions` 降序排列，最多 5 个 | JSON 结构检查 |
+| AC7.8 | `installTrend` 数组按 `week` 升序排列，包含 `count` 和 `cumulative` | JSON 结构检查 |
+| AC7.9 | AI 渲染 `stats --detail` 时不输出原始 JSON | AI 响应检查 |
+| AC7.10 | AI 渲染中包含推荐漏斗（三个转化率至少有数值呈现） | AI 响应检查：可见「曝光」「点击」「安装」及百分比 |
+| AC7.11 | AI 渲染中包含至少一条数据洞察（如转化率对比、类别偏好、趋势判断） | AI 响应检查：可见 `💡` 开头的洞察行 |
+| AC7.12 | 后端不可用时 AI 渲染仅展示本地 token 数据 + 「后端数据暂时不可用」提示 | AI 响应检查：无后端数据时不编造 |
+
+### 11.5 涉及文件
+
+| 文件 | 变更类型 | 变更说明 |
+|------|:-------:|---------|
+| `scripts/lib/stats.js` | 修改 | 新增 `handleStatsDetail()` 函数：组装本地 token + 请求后端 user stats |
+| `scripts/lib/http.js` | 修改 | `ALLOWED_ENDPOINTS` 新增 `/stats/user/[a-f0-9]{16}` |
+| `scripts/shell.js` | 修改 | 调度路由新增 `stats --detail` + `--period` 参数解析 |
+| `scripts/lib/core.js` | 修改 | 新增 `fetchUserStats(userId, period)` helper |
+| `SKILL.md` | 新增 | §16 Stats Dashboard 渲染规则（detail 模式） |
+| **后端** | **新增** | `GET /stats/user/:userId` endpoint（需与后端团队协调实现） |
+
+### 11.6 后端 API 契约补充
+
+#### `GET /stats/user/:userId` — 详细规范
+
+| 属性 | 值 |
+|------|-----|
+| **方法** | `GET` |
+| **路径** | `/stats/user/:userId` |
+| **认证** | Device FP（via `x-device-fp` header） |
+| **查询参数** | `period`（`7d`/`30d`/`90d`，默认 `30d`）、`includeTrend`（`true`/`false`，默认 `true`） |
+| **响应** | `{ userId, period, stats: { eventsTotal, eventsByType, recommendShown, recommendClicked, recommendInstalled, conversionRate, activeDays, activeDaysRatio, topSkills[], installTrend[], categoryDistribution }, generatedAt }` |
+| **错误处理** | `401` 未认证 → AI 提示「需要重新认证」；`403` userId 不匹配 → AI 不重试；`404` 用户不存在 → AI 提示「暂无数据，使用一段时间后回来查看」；`500` → 降级到本地 token 数据 |
+| **缓存策略** | 客户端缓存 5 分钟（同一周期内不重复请求）；ETag 支持可选 |
+| **频率限制** | 每分钟最多 10 次请求（per device FP） |
+
+---
+
+## 12. 需求 8：Perception 集成
+
+### 12.1 问题描述
+
+Mapick 的推荐系统（G6 contextual）基于用户 profile 标签 + 已安装 skill 列表生成推荐。但这个推荐到底准不准？推荐了 100 个 skill，用户装了几个？哪些类别的推荐最精准？哪些类别总是被忽略？
+
+后端已有 perception 系统（负责后验分析推荐准确率），但它从未被客户端使用。这导致：
+
+- **用户看不到推荐效果**：只知道「Mapick 推了东西给我」，不知道推得准不准
+- **推荐系统无法从用户行为中学习**：perception 数据对后端来说是优化算法的输入，但如果客户端不展示、用户不反馈，数据闭环就不完整
+- **Daily digest 缺乏深度**：当前的每日通知只说「有新的推荐」或「token 消耗」，缺少对推荐质量的反思
+
+Perception 集成将后端已有的后验分析数据呈现给用户，完成「推荐 → 行为追踪 → 准确率分析 → 用户可见」的闭环。
+
+### 12.2 功能描述
+
+#### F8.1：接入 `GET /perception/accuracy-trend`
+
+客户端接入后端已有的 `GET /perception/accuracy-trend` 端点，获取推荐准确率的时间趋势。
+
+**端点定义**（后端已实现，客户端首次接入）：
+
+| 属性 | 值 |
+|------|-----|
+| **路径** | `GET /api/v1/perception/accuracy-trend` |
+| **方法** | `GET` |
+| **认证** | Device FP（via `x-device-fp` header） |
+| **查询参数** | `period`（可选，`7d`/`30d`/`90d`，默认 `30d`） |
+| **成功响应** | `200 OK`，见下方 schema |
+
+**响应 Schema**（预期的后端返回格式）：
+
+```json
+{
+  "period": {
+    "from": "2026-04-01T00:00:00Z",
+    "to": "2026-05-01T00:00:00Z",
+    "days": 30
+  },
+  "trend": [
+    { "date": "2026-04-25", "accuracy": 0.72, "total": 15, "correct": 11 },
+    { "date": "2026-04-26", "accuracy": 0.68, "total": 12, "correct": 8 },
+    { "date": "2026-04-27", "accuracy": 0.75, "total": 18, "correct": 14 },
+    { "date": "2026-04-28", "accuracy": 0.80, "total": 10, "correct": 8 },
+    { "date": "2026-04-29", "accuracy": 0.73, "total": 14, "correct": 10 },
+    { "date": "2026-04-30", "accuracy": 0.78, "total": 16, "correct": 12 },
+    { "date": "2026-05-01", "accuracy": 0.82, "total": 8, "correct": 7 }
+  ],
+  "overall": {
+    "accuracy": 0.75,
+    "totalPredictions": 93,
+    "correctPredictions": 70
+  },
+  "byCategory": [
+    { "category": "security-qa", "accuracy": 0.85, "total": 25, "correct": 21 },
+    { "category": "dev-tools", "accuracy": 0.78, "total": 30, "correct": 23 },
+    { "category": "productivity", "accuracy": 0.72, "total": 18, "correct": 13 },
+    { "category": "data-science", "accuracy": 0.55, "total": 12, "correct": 7 },
+    { "category": "frontend", "accuracy": 0.60, "total": 8, "correct": 5 }
+  ]
+}
+```
+
+**字段说明**：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `trend[].date` | string | ISO 日期 |
+| `trend[].accuracy` | number | 当日推荐准确率（correct / total），0-1 |
+| `trend[].total` | number | 当日推荐总量（用户收到了多少推荐） |
+| `trend[].correct` | number | 当日正确推荐数（用户点击或安装了推荐） |
+| `overall.accuracy` | number | 周期内整体准确率 |
+| `byCategory[].accuracy` | number | 按类别拆分的推荐准确率 |
+
+**准确率定义**（需与后端对齐）：
+
+> 准确率 = 用户点击或安装的推荐数 / 推荐曝光总数
+
+「正确推荐」定义为用户在推荐曝光后 **24 小时内** 点击或安装了该推荐。这个定义需要在客户端和后端保持一致。
+
+#### F8.2：接入 `GET /perception/summary`
+
+客户端接入 `GET /perception/summary`，获取感知系统的整体摘要——用于每日 digest 和 stats dashboard。
+
+**端点定义**（后端已实现，客户端首次接入）：
+
+| 属性 | 值 |
+|------|-----|
+| **路径** | `GET /api/v1/perception/summary` |
+| **方法** | `GET` |
+| **认证** | Device FP（via `x-device-fp` header） |
+| **查询参数** | 无 |
+| **成功响应** | `200 OK`，见下方 schema |
+
+**响应 Schema**（预期的后端返回格式）：
+
+```json
+{
+  "overallAccuracy": 0.75,
+  "totalPredictions": 450,
+  "correctPredictions": 338,
+  "trendDirection": "improving",
+  "trendDelta": 0.08,
+  "topCorrectCategories": [
+    { "category": "security-qa", "accuracy": 0.85 },
+    { "category": "dev-tools", "accuracy": 0.78 }
+  ],
+  "topMissedCategories": [
+    { "category": "data-science", "accuracy": 0.55 },
+    { "category": "frontend", "accuracy": 0.60 }
+  ],
+  "insights": [
+    "推荐准确率在安全类 skill 中最高（85%），在数据科学类最低（55%）",
+    "过去 7 天准确率从 72% 提升至 82%（+10%），呈上升趋势",
+    "建议完善 data-science 和 frontend 的 profile 标签以获得更精准推荐"
+  ],
+  "generatedAt": "2026-05-01T12:00:00Z"
+}
+```
+
+**字段说明**：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `overallAccuracy` | number | 全周期整体准确率（0-1） |
+| `totalPredictions` | number | 推荐预测总数 |
+| `correctPredictions` | number | 正确预测数 |
+| `trendDirection` | string | 趋势方向：`improving` / `declining` / `stable` |
+| `trendDelta` | number | 最近一周准确率变化量（正数 = 改善，负数 = 下降） |
+| `topCorrectCategories` | array | 准确率最高的类别 top 2 |
+| `topMissedCategories` | array | 准确率最低的类别 top 2 |
+| `insights` | array | 人类可读的洞察文本（后端生成） |
+
+#### F8.3：Stats Dashboard 中的感知展示
+
+在 `stats --detail` 的输出中集成 perception 数据。当 `stats --detail` 触发时，客户端额外发起 perception 请求。
+
+**新增的第三个数据源**：
+
+```
+stats --detail
+    ├── 本地 token 解析（Phase 2，已有）
+    ├── GET /stats/user/:userId（F7.1，新增）
+    └── GET /perception/accuracy-trend（F8.1，新增）
+```
+
+**渲染位置**：在推荐漏斗下方插入「推荐准确率」区块：
+
+```
+🎯 推荐漏斗（30 天）
+   曝光 340 → 点击 85(25%) → 安装 42(49%)
+   整体转化率：12.4%
+
+📐 推荐准确率（后验分析）
+   整体准确率：75%（70/93 条推荐命中）
+   趋势：▁▂▃▄▅▆▇  ↗ 上升（+10%，近 7 天）
+   
+   按类别：
+     security-qa  85% ████████████████░  ★ 最准
+     dev-tools    78% ███████████████░░
+     productivity 72% ██████████████░░░
+     frontend     60% ████████████░░░░░
+     data-science 55% ███████████░░░░░░  ▲ 需关注
+   
+   💡 洞察：安全类推荐最精准(85%)，你的安全工具探索意愿很强。
+      数据科学类准确率偏低(55%)，建议完善相关 profile 标签。
+```
+
+**渲染规则**（写入 SKILL.md §16）：
+
+1. 准确率区块在推荐漏斗之后、Top Skills 之前展示。
+2. 趋势用 7 段 ASCII sparkline（`▁▂▃▄▅▆▇`）可视化最近 7 天的趋势。
+3. 按类别拆分用 ASCII bar 展示，标注最高/最低。
+4. 如果 perception 端点不可用（5xx/超时），跳过该区块——不阻塞 stats 渲染。
+5. 后端返回的 `insights` 数组至少在渲染中引用 1 条。
+
+#### F8.4：Daily Digest 中的感知摘要
+
+`notify daily`（每日通知）中集成 `GET /perception/summary`，在每日 digest 消息末尾插入「Mapick 感知简报」。
+
+**集成方式**：
+
+```javascript
+// notify daily 流程（scripts/lib/notify.js handleNotifyDaily()）中新增：
+const perceptionSummary = await fetchPerceptionSummary(); // GET /perception/summary
+// 如果请求成功，拼接到 daily digest JSON 中
+```
+
+**Digest JSON 扩展**（新增 `perception` 字段）：
+
+```json
+{
+  "intent": "notify:daily",
+  "radar": { "..." },
+  "token_snapshot": { "..." },
+  "perception": {
+    "overallAccuracy": 0.75,
+    "trendDirection": "improving",
+    "insight": "推荐准确率 75%，近 7 天上升趋势（+10%）。安全类推荐最精准。"
+  }
+}
+```
+
+**AI 渲染示例**（在 daily digest 末尾追加）：
+
+```
+🧠 Mapick 感知简报
+   推荐准确率：75%（↑ +10%，近 7 天）
+   最精准类别：安全类(85%)、开发工具(78%)
+   建议关注：数据科学类准确率偏低(55%)，可完善 profile 标签
+```
+
+**渲染规则**：
+
+1. 感知简报放在 daily digest 的末尾，作为补充信息而非主要信息。
+2. 如果 perception 端点不可用，**静默跳过**——不在 daily digest 中提示「感知数据不可用」。
+3. 如果整体准确率低于 50%，AI 主动建议用户运行 `stats --detail` 查看详细分析。
+4. 如果 `trendDirection === "declining"` 且 `trendDelta < -0.1`，AI 建议用户更新 profile 标签。
+
+#### F8.5：ALLOWED_ENDPOINTS 变更
+
+为接入 perception 端点，需在 `ALLOWED_ENDPOINTS`（`scripts/lib/http.js`）中新增两条正则：
+
+```diff
+  const ALLOWED_ENDPOINTS = [
+    /^\/assistant\/(status|workflow|daily-digest|weekly)\/[a-f0-9]{16}$/,
+    /^\/recommendations\/(feed|track)$/,
+    /^\/recommendations\/contextual$/,
+    /^\/skills\/live-search$/,
+    /^\/skills\/check-updates$/,
+    /^\/users\/[a-f0-9]{16}\/(zombies|profile-text)$/,
++   /^\/stats\/user\/[a-f0-9]{16}$/,
+    /^\/users\/(trusted-skills|data|consent)$/,
+    /^\/events\/track$/,
+    /^\/bundle$/,
+    /^\/bundle\/seed$/,
+    /^\/bundle\/recommend\/list$/,
+    /^\/bundle\/[\w-]+$/,
+    /^\/bundle\/[\w-]+\/install$/,
+    /^\/report\/persona$/,
+    /^\/share\/upload$/,
+    /^\/skill\/[\w-]+\/(security|report)$/,
+    /^\/stats\/public$/,
++   /^\/perception\/accuracy-trend$/,
++   /^\/perception\/summary$/,
+    /^\/notify\/daily-check$/,
+  ];
+```
+
+**总计新增** 3 条正则：
+- `/^\/stats\/user\/[a-f0-9]{16}$/` — F7.1
+- `/^\/perception\/accuracy-trend$/` — F8.1
+- `/^\/perception\/summary$/` — F8.2
+
+### 12.3 用户故事
+
+#### US-8.1：用户在 stats 中看到推荐准确率
+
+> **作为** 在意推荐质量的用户  
+> **我希望** 在 `/mapick stats --detail` 中看到推荐准确率趋势和按类别的拆分  
+> **以便** 我判断 Mapick 的推荐是否越来越懂我，以及哪些领域需要完善 profile
+
+**优先级**：P1  
+**依赖**：F8.1、F8.3、F7（stats --detail 框架）  
+**预期效果**：用户对推荐系统的信任度提升，驱动 profile 完善行为
+
+#### US-8.2：用户在每日通知中看到感知简报
+
+> **作为** 每天查看 Mapick 通知的用户  
+> **我希望** 在 daily digest 中看到推荐准确率的简要汇报  
+> **以便** 我不用主动查 stats 也能感知推荐系统的表现变化
+
+**优先级**：P1  
+**依赖**：F8.2、F8.4  
+**预期效果**：增加 daily digest 的信息深度，从「推荐了什么」升级为「推荐得怎么样」
+
+#### US-8.3：后端不可用时无感知降级
+
+> **作为** 在网络波动环境下的用户  
+> **我希望** perception 数据不可用时，stats 和 daily digest 仍能正常展示核心信息  
+> **以便** 我不会因为一个辅助功能不可用而丢失核心体验
+
+**优先级**：P2  
+**依赖**：F8.3（跳过逻辑）、F8.4（静默跳过）  
+**预期效果**：perception 是「锦上添花」而非「不可或缺」，降级不影响核心链路
+
+#### US-8.4：准确率下降时获得 actionable 建议
+
+> **作为** 发现推荐准确率下降的用户  
+> **我希望** Mapick 不只告诉我「准确率下降了」，还要告诉我可以做什么（如更新 profile 标签、清理不再需要的 skill）  
+> **以便** 我能采取行动改善推荐质量，而不是被动接受下降
+
+**优先级**：P2  
+**依赖**：F8.2（insights 字段）、F8.4（AI 建议逻辑）  
+**预期效果**：数据展示 → 用户行动的正向循环
+
+### 12.4 验收标准
+
+| # | 验收条件 | 测试方法 |
+|:-:|---------|---------|
+| AC8.1 | `GET /perception/accuracy-trend` 在 `ALLOWED_ENDPOINTS` 中 | 代码检查 `http.js` |
+| AC8.2 | `GET /perception/summary` 在 `ALLOWED_ENDPOINTS` 中 | 代码检查 `http.js` |
+| AC8.3 | `stats --detail` 输出中包含 `perception` 数据块（accuracy trend） | JSON 检查：`remote.perception` 字段存在且非空 |
+| AC8.4 | AI 渲染 stats --detail 时包含「推荐准确率」区块 | AI 响应检查：可见「准确率」「趋势」关键词 |
+| AC8.5 | AI 渲染准确率时使用 sparkline（7 段）可视化趋势 | AI 响应检查：可见 `▁▂▃▄▅▆▇` 字符 |
+| AC8.6 | AI 渲染准确率时按类别拆分（至少展示 top 3 / bottom 2） | AI 响应检查：可见类别名 + 百分比 |
+| AC8.7 | Daily digest JSON 中包含 `perception` 字段 | notify daily 输出检查 |
+| AC8.8 | Daily digest AI 渲染末尾有「感知简报」区块（如果 perception 成功） | AI 响应检查 |
+| AC8.9 | Perception 请求失败时 daily digest 不展示感知区块（静默跳过） | 模拟后端故障，检查日常通知不含 perception 内容 |
+| AC8.10 | Perception 请求失败时 stats --detail 仍正常展示（跳过感知区块） | 模拟后端故障，检查 stats 输出 |
+| AC8.11 | 整体准确率 < 50% 时 daily digest 建议用户运行 `stats --detail` | AI 响应检查 |
+| AC8.12 | `trendDirection === "declining"` 且 delta < -0.1 时建议完善 profile | AI 响应检查 |
+
+### 12.5 涉及文件
+
+| 文件 | 变更类型 | 变更说明 |
+|------|:-------:|---------|
+| `scripts/lib/http.js` | 修改 | `ALLOWED_ENDPOINTS` 新增 3 条：`/stats/user/`、`/perception/accuracy-trend`、`/perception/summary` |
+| `scripts/lib/stats.js` | 修改 | `handleStatsDetail()` 新增 perception 数据获取 + 合并逻辑 |
+| `scripts/lib/core.js` | 修改 | 新增 `fetchPerceptionTrend(period)` 和 `fetchPerceptionSummary()` helper |
+| `scripts/lib/notify.js` | 修改 | `handleNotifyDaily()` 集成 perception summary 到 digest JSON |
+| `SKILL.md` | 新增 | §17 Perception 集成渲染规则（accuracy trend + daily digest perception 简报） |
+| **后端**（参考） | 已有 | `/perception/accuracy-trend` 和 `/perception/summary` 已实现，客户端首次接入 |
+
+---
+
+## 13. Phase 3 优先级排序
+
+### 13.1 排序总览
+
+| 优先级 | 需求 | 工作量 | 用户价值 | 前置条件 |
+|:------:|------|:------:|:-------:|---------|
+| **P3-1** | G7 Stats Dashboard — 后端端点 + CLI | 1.5 天 | ⭐⭐⭐⭐⭐ | 后端 `/stats/user/:userId` 需同步开发 |
+| **P3-2** | G8 Perception 集成 — Stats 中的准确率 | 1 天 | ⭐⭐⭐⭐ | G7（stats --detail 框架）+ Perception 端点已有 |
+| **P3-3** | G8 Perception 集成 — Daily Digest | 0.5 天 | ⭐⭐⭐ | G7（notify 链路）+ Perception 端点已有 |
+
+### 13.2 排序理由
+
+1. **G7 优先**：Stats dashboard 是整个 Phase 3 的数据展示框架。F8 的 perception 数据需要 stats dashboard 作为载体。且 G7 依赖后端新增端点（`GET /stats/user/:userId`），需要与后端团队协调排期，应尽早启动。
+
+2. **G8 Stats 集成次之**：perception accuracy-trend 的展示依赖 G7 的 `stats --detail` 框架，但 perception 端点已经存在，客户端接入工作量小（约 1 天）。在 stats dashboard 中展示准确率能直接提升用户对推荐系统的信任。
+
+3. **G8 Daily Digest 最后**：daily digest 中的感知简报是「锦上添花」——用户不主动查 stats 时，仍能在日常通知中感知推荐质量。工作量最小（0.5 天），可作为 Phase 3 的收尾。
+
+### 13.3 实施建议
+
+```
+Day 1-2 (G7)          Day 2-3 (G8 Stats)     Day 3 (G8 Digest)    Day 4
+────────────────────────────────────────────────────────────────────────
+后端 /stats/user/:userId 开发（后端团队）
+客户端 stats --detail 框架      ───────┤
+                       Perception accuracy-trend 集成 ──┤
+                                           Daily digest 集成 ──┤
+                                                               Integration Test ┤
+```
+
+**里程碑**：
+
+| 里程碑 | 完成标准 | 预估日期 |
+|--------|---------|---------|
+| M5：后端 Stats 端点可用 | `GET /stats/user/:userId` 返回有效数据 | Day 2 开始 |
+| M6：Stats Dashboard 可用 | `stats --detail` 返回合并后的完整 JSON，AI 正确渲染 | Day 2 结束 |
+| M7：Perception 集成可用 | `stats --detail` 中包含准确率区块，daily digest 中有感知简报 | Day 3 结束 |
+| M8：Phase 3 集成测试完成 | 所有功能串联、降级策略验证、安全扫描通过 | Day 4 结束 |
+
+### 13.4 与 Phase 2 的依赖关系
+
+```
+Phase 2 (已完成或并行)            Phase 3 (本次)
+─────────────────────────────────────────────────
+G5 stats token           ───→    G7 stats --detail（融合本地 + 后端）
+G6 contextual 推荐        ───→    G8 推荐准确率展示
+G4 proactive_mode         ───→    G8 daily digest 感知简报（仅 helpful 模式展示）
+notify daily 链路          ───→    G8 daily digest 感知集成
+```
+
+---
+
+## 14. Phase 3 API 依赖映射
+
+### 14.1 依赖矩阵
+
+| 需求 | 端点 | 方法 | 使用场景 | 是否新增客户端调用 | 状态 |
+|------|------|:---:|---------|:-----------------:|------|
+| G7 Stats Dashboard | `/stats/user/:userId` | GET | `stats --detail` 获取个人使用全貌 | **是** | **后端待开发** |
+| G8 Perception | `/perception/accuracy-trend` | GET | `stats --detail` 中展示推荐准确率趋势 | **是** | 后端已实现，客户端首次接入 |
+| G8 Perception | `/perception/summary` | GET | `notify daily` 中展示感知摘要 | **是** | 后端已实现，客户端首次接入 |
+
+### 14.2 ALLOWED_ENDPOINTS 变更汇总
+
+**Phase 2 新增**（1 条）：
+
+| 正则 | 来源 |
+|------|------|
+| `/^\/recommendations\/contextual$/` | G6 推荐增强 |
+
+**Phase 3 新增**（3 条）：
+
+| 正则 | 来源 |
+|------|------|
+| `/^\/stats\/user\/[a-f0-9]{16}$/` | G7 Stats Dashboard |
+| `/^\/perception\/accuracy-trend$/` | G8 Perception 集成 |
+| `/^\/perception\/summary$/` | G8 Perception 集成 |
+
+**Phase 2 + Phase 3 合计**：ALLOWED_ENDPOINTS 从 Phase 1 的 20 条增加至 24 条。
+
+### 14.3 后端 API 契约汇总
+
+#### `GET /stats/user/:userId`（新增）
+
+| 属性 | 值 |
+|------|-----|
+| **方法** | `GET` |
+| **路径** | `/stats/user/:userId` |
+| **认证** | Device FP（via `x-device-fp` header） |
+| **查询参数** | `period`（`7d`/`30d`/`90d`）、`includeTrend`（`true`/`false`） |
+| **响应** | `{ userId, period, stats: { eventsTotal, eventsByType, recommendShown, recommendClicked, recommendInstalled, conversionRate, activeDays, activeDaysRatio, topSkills[], installTrend[], categoryDistribution }, generatedAt }` |
+| **错误处理** | `401`/`403`/`404`/`500`；`5xx` 时客户端降级到本地 token 数据 |
+| **频率限制** | 10 req/min per device FP |
+| **缓存** | 客户端 5 分钟缓存；支持 ETag（可选） |
+
+#### `GET /perception/accuracy-trend`（已有，客户端首次接入）
+
+| 属性 | 值 |
+|------|-----|
+| **方法** | `GET` |
+| **路径** | `/perception/accuracy-trend` |
+| **认证** | Device FP（via `x-device-fp` header） |
+| **查询参数** | `period`（`7d`/`30d`/`90d`） |
+| **响应** | `{ period, trend[], overall: { accuracy, totalPredictions, correctPredictions }, byCategory[] }` |
+| **错误处理** | `5xx` 时 stats --detail 跳过感知区块；`401`/`403` 同上 |
+| **缓存** | 客户端 10 分钟缓存 |
+
+#### `GET /perception/summary`（已有，客户端首次接入）
+
+| 属性 | 值 |
+|------|-----|
+| **方法** | `GET` |
+| **路径** | `/perception/summary` |
+| **认证** | Device FP（via `x-device-fp` header） |
+| **查询参数** | 无 |
+| **响应** | `{ overallAccuracy, totalPredictions, correctPredictions, trendDirection, trendDelta, topCorrectCategories[], topMissedCategories[], insights[], generatedAt }` |
+| **错误处理** | `5xx` 时 daily digest 静默跳过；`401`/`403` 同上 |
+| **缓存** | 客户端 30 分钟缓存（daily summary 变化频率低） |
+
+---
+
+## 15. Phase 3 非功能需求
+
+### 15.1 性能
+
+| 需求 | 指标 | 目标 |
+|------|------|------|
+| G7 stats --detail | 多路数据获取总耗时（本地 token + 后端 stats + perception） | ≤ 3 秒（含网络请求） |
+| G7 stats --detail | 后端 `/stats/user/:userId` API 响应时间 | ≤ 500ms（p95） |
+| G8 perception | `/perception/accuracy-trend` API 响应时间 | ≤ 300ms（p95） |
+| G8 perception | `/perception/summary` API 响应时间 | ≤ 200ms（p95） |
+| G7 remote fallback | 后端请求超时时间 | 2 秒（单端点），超时后降级 |
+| G7 data freshness | 后端 stats 数据更新延迟 | ≤ 5 分钟（event track → stats 聚合） |
+
+### 15.2 兼容性
+
+| 需求 | 要求 |
+|------|------|
+| 向后兼容 | `stats token today/week` 行为不变（不加 `--detail` 时保持 Phase 2 行为） |
+| 向后兼容 | `notify daily` 在 perception 数据缺失时行为不变 |
+| ALLOWED_ENDPOINTS | 新增 endpoint 遵循现有正则模式，不破坏已有匹配 |
+| userId 格式 | 保持 16 位十六进制字符 `[a-f0-9]{16}` |
+
+### 15.3 可观测性
+
+| 需求 | 要求 |
+|------|------|
+| G7 stats fetch | 后端 stats 请求失败时记录结构化错误（status code + 错误信息），写入本地日志 |
+| G8 perception fetch | perception 请求失败时静默记录（不影响用户体验），写入本地日志 |
+| G7 stats detail | `stats --detail` 执行时触发 `POST /events/track`（type=`stats_detail_view`） |
+| G8 perception | 每日 digest 中 perception 数据的展示/跳过比例上报 events |
+
+### 15.4 安全性
+
+| 需求 | 要求 |
+|------|------|
+| G7 user stats | `/stats/user/:userId` 必须校验 `x-device-fp` 与 userId 的绑定关系，返回 403 如果不匹配 |
+| G7 user stats | 响应的 `topSkills` 仅包含 slug/name/interactions/category，不含 token 或用户私密数据 |
+| G8 perception | perception 端点同样需要 device FP 认证 |
+| ALLOWED_ENDPOINTS | 仅允许 GET 请求到 perception 和 stats 端点 |
+
+### 15.5 降级策略
+
+| 场景 | 降级行为 | 用户感知 |
+|------|---------|---------|
+| `GET /stats/user/:userId` 返回 5xx | 仅展示本地 token 数据 + 「后端数据暂时不可用，稍后自动重试」 | 可见降级提示 |
+| `GET /stats/user/:userId` 超时（>2s） | 同上 | 同上 |
+| `GET /perception/accuracy-trend` 返回 5xx | stats --detail 跳过「推荐准确率」区块 | 该区块不显示，其余正常 |
+| `GET /perception/summary` 返回 5xx | daily digest 跳过「感知简报」区块 | 静默跳过，不提示 |
+| 本地 token 解析失败 | stats --detail 仅展示后端数据 + 「本地 token 数据解析失败」提示 | 可见降级提示 |
+| 所有数据源均失败 | 返回友好错误：「暂时无法获取统计数据，请检查网络后重试」 | 完整降级 |
+
+---
+
+## 16. Phase 3 风险与依赖
+
+### 16.1 风险
+
+| # | 风险 | 概率 | 影响 | 缓解措施 |
+|:-:|------|:---:|:---:|---------|
+| R7 | 后端 `/stats/user/:userId` 开发延期 | 中 | 高 — stats --detail 无后端数据 | Phase 2 的 `stats token` 独立可用；客户端实现 remote fallback，确保有后端数据前也能展示本地数据 |
+| R8 | Perception 端点返回格式与预期不一致 | 中 | 中 — 准确率展示失败 | 客户端健壮解析（`try/catch` 包裹）；格式不匹配时跳过感知区块，不影响核心 stats |
+| R9 | Events 表中数据不足（新用户没有足够事件） | 高 | 低 — 新用户 dashboard 空荡荡 | 后端返回空数据时 `eventsTotal: 0`；客户端展示「数据收集中，使用 7 天后来看完整报告」 |
+| R10 | 后端 stats 聚合查询在大数据量下性能不足 | 低 | 高 — API 响应超时 | 后端需对 events 表建立时间+userId 索引；客户端设置 2s 超时，超时即降级 |
+| R11 | Perception 端点与 G6 contextual 推荐的准确率定义不一致 | 中 | 中 — 数据展示误导 | 与后端团队明确「准确率」定义（24h 内点击/安装），写入 API 契约文档 |
+| R12 | ClawHub 安全扫描对新增的 perception 数据展示逻辑标 Suspicious | 低 | 中 | 感知数据仅展示统计数字，不涉及文件读取或网络请求到非白名单域名；发布前跑三档扫描 |
+
+### 16.2 依赖
+
+| # | 依赖项 | 类型 | 说明 |
+|:-:|------|:---:|------|
+| D8 | 后端实现 `GET /stats/user/:userId` | 外部 | G7 核心依赖，需与后端团队协调排期 |
+| D9 | 后端 events 表包含 recommend_view / recommend_click / recommend_install 事件 | 外部 | G7 推荐漏斗的数据源 |
+| D10 | 后端 `/perception/accuracy-trend` 端点格式与预期一致 | 外部 | G8 stats 集成依赖 |
+| D11 | 后端 `/perception/summary` 端点格式与预期一致 | 外部 | G8 daily digest 集成依赖 |
+| D12 | Phase 2 G5 `stats token` 已实现 | 前置 | G7 `stats --detail` 复用本地 token 解析逻辑 |
+| D13 | Phase 2 G1 notify daily 链路已稳定 | 前置 | G8 daily digest 感知集成依赖 notify 链路 |
+| D14 | Phase 2 G4 `proactive_mode` CONFIG 读写已稳定 | 前置 | G8 daily digest 仅 helpful 模式展示完整感知简报 |
+| D15 | `api.mapick.ai` 可达 | 网络 | G7/G8 所有后端端点 |
+| D16 | 无数据库新增依赖 | — | 全部复用现有后端基础设施 |
+
+---
+
+## 17. Phase 3 附录
+
+### 17.1 术语表（Phase 3 补充）
+
+| 术语 | 说明 |
+|------|------|
+| Stats Dashboard | 用户使用全景仪表盘，融合本地 token 数据 + 后端 user stats + perception 数据 |
+| 推荐漏斗 | 从推荐曝光到安装的转化路径：shown → clicked → installed |
+| 推荐准确率 | 推荐被用户点击或安装的比例（后验分析），计算方式 = correctPredictions / totalPredictions |
+| Perception | 感知系统，负责后验分析推荐效果，包括准确率趋势和类别拆分 |
+| Daily Digest 感知简报 | 每日通知末尾的推荐准确率简要汇报 |
+| Sparkline | ASCII 字符构成的迷你趋势图（`▁▂▃▄▅▆▇`），用于可视化 7 天准确率趋势 |
+| Remote fallback | 后端请求失败时的降级策略，确保核心功能不受影响 |
+
+### 17.2 与 Phase 4 的关系展望
+
+```
+Phase 3 (本次)                        Phase 4 (远期)
+────────────────────────────────────────────────────────────
+G7 Stats Dashboard              ───→  社交分享（分享 stats 卡片）
+G8 Perception 集成               ───→  AI 模型路由 M8（基于准确率选择模型）
+G7 推荐漏斗                      ───→  Cost optimization（基于转化率优化推荐策略）
+G7/G8 数据基础设施               ───→  开发者 API M7（暴露 stats 和 perception）
+```
+
+### 17.3 Phase 2 + Phase 3 完整端点清单
+
+| # | 端点 | Phase | 用途 |
+|:-:|------|:-----:|------|
+| 1 | `/assistant/(status\|workflow\|daily-digest\|weekly)/:id` | 1 | 助理交互 |
+| 2 | `/recommendations/(feed\|track)` | 1 | 推荐获取 |
+| 3 | `/recommendations/contextual` | 2 | 上下文推荐 |
+| 4 | `/skills/live-search` | 1 | Skill 搜索 |
+| 5 | `/skills/check-updates` | 1 | Skill 更新检查 |
+| 6 | `/users/:id/(zombies\|profile-text)` | 1 | 用户数据 |
+| 7 | `/stats/user/:id` | **3** | 个人 stats |
+| 8 | `/stats/public` | 1 | 公开统计 |
+| 9 | `/users/(trusted-skills\|data\|consent)` | 1 | 用户管理 |
+| 10 | `/events/track` | 1 | 事件追踪 |
+| 11 | `/bundle/*` | 1 | Bundle 管理 |
+| 12 | `/report/persona` | 1 | Persona 报告 |
+| 13 | `/share/upload` | 1 | 分享上传 |
+| 14 | `/skill/:slug/(security\|report)` | 1 | Skill 详情 |
+| 15 | `/notify/daily-check` | 1 | 每日通知 |
+| 16 | `/perception/accuracy-trend` | **3** | 准确率趋势 |
+| 17 | `/perception/summary` | **3** | 感知摘要 |
+
+### 17.4 参考资料
+
+| 文档 | 路径 |
+|------|------|
+| Phase 1 PRD | `revisions/upgrade-plan-20260501/PRD.md`（本仓库上游） |
+| Phase 2 PRD | 本文档 §1-§9 |
+| Phase 2 升级计划 | `revisions/upgrade-plan-20260501/README.md` |
+| V1.5 三大功能开发文档 | `revisions/slack-02/Mapick_V1.5_三大功能开发文档_KT.md` |
+| 当前 ALLOWED_ENDPOINTS | `scripts/lib/http.js:59-77` |
+| 当前 stats.js（Phase 2） | `scripts/lib/stats.js` |
+| 当前 notify.js（Phase 2） | `scripts/lib/notify.js` |
+
+### 17.5 变更历史（Phase 3 追加）
+
+| 日期 | 版本 | 变更 |
+|------|:---:|------|
+| 2026-05-01 | 1.0 | 初始版本，覆盖 Phase 2 三个 P1 需求 |
+| 2026-05-01 | 1.2 | 追加 Phase 3：G7 Stats Dashboard 增强、G8 Perception 集成 |
+
+---
+
+*Phase 3 预计总工时：3-4 天*
+*文档状态：Draft → 待后端端点评审 → 评审通过后与 Phase 2 并行或串行开发*

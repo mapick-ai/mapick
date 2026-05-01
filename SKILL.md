@@ -659,6 +659,8 @@ User-facing:
 | `/mapick daily`          | Daily digest                                         | today, yesterday, 今日摘要 |
 | `/mapick weekly`         | Weekly summary                                       | this week, last week, 周报 |
 | `/mapick stats`          | Global & personal stats (installs, conversions)      | statistics, 数据统计 |
+| `/mapick stats --detail` | Detailed personal stats + accuracy trend             | my stats, 个人统计, 详细统计 |
+| `/mapick stats user`     | Alias for stats --detail                             | 个人数据 |
 | `/mapick radar`          | Daily gap radar (silent when nothing to report)      | radar, 雷达, 机会 |
 | `/mapick profile clear`  | Reset workflow profile + retrigger first-run summary | reset profile, 重置配置 |
 | `/mapick diagnose`       | Show loaded version/path and workspace shadow risks  | version, loaded path, 诊断, 版本信息 |

@@ -40,8 +40,17 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
   }
   .status.online { color: #3fb950; }
   .status.offline { color: #f85149; }
+  .section-title {
+    font-size: 14px; font-weight: 600; color: #8b949e;
+    text-transform: uppercase; letter-spacing: 0.5px; margin: 32px 0 16px 0;
+    border-bottom: 1px solid #30363d; padding-bottom: 8px;
+  }
   .grid {
     display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px;
+    margin-bottom: 24px;
+  }
+  .grid-4 {
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px;
     margin-bottom: 24px;
   }
   .card {
@@ -64,6 +73,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
   .card .value.purple { color: #bc8cff; }
   .card .value.orange { color: #d29922; }
   .card .value.pink { color: #f778ba; }
+  .card .value.red { color: #f85149; }
   h2 {
     font-size: 16px; font-weight: 600; margin-bottom: 16px;
     color: #f0f6fc;
@@ -97,6 +107,28 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
   }
   .fun-fact .label { color: #8b949e; font-size: 12px; text-transform: uppercase; margin-bottom: 8px; }
   .fun-fact .text { color: #f0f6fc; }
+  .top-skills {
+    background: #161b22; border: 1px solid #30363d; border-radius: 8px;
+    padding: 24px; margin-bottom: 24px;
+  }
+  .top-skills-list {
+    list-style: none; margin-top: 12px;
+  }
+  .top-skills-list li {
+    display: flex; align-items: center; gap: 12px;
+    padding: 8px 0; border-bottom: 1px solid #21262d;
+  }
+  .top-skills-list li:last-child { border-bottom: none; }
+  .skill-rank {
+    font-size: 20px; font-weight: 700; color: #58a6ff;
+    min-width: 32px; text-align: center;
+  }
+  .skill-name {
+    font-size: 14px; color: #f0f6fc; flex: 1;
+  }
+  .skill-count {
+    font-size: 13px; color: #8b949e; font-family: monospace;
+  }
   .events-table {
     width: 100%; border-collapse: collapse; margin-top: 12px;
   }
@@ -115,7 +147,20 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
   }
   .error { color: #f85149; text-align: center; padding: 40px; }
   .loading { text-align: center; padding: 40px; color: #8b949e; }
-  @media (max-width: 640px) { .grid { grid-template-columns: 1fr; } }
+  .accuracy-chart {
+    background: #161b22; border: 1px solid #30363d; border-radius: 8px;
+    padding: 24px; margin-bottom: 24px;
+  }
+  .accuracy-values {
+    display: flex; gap: 16px; margin-top: 16px;
+  }
+  .accuracy-item {
+    flex: 1; text-align: center; padding: 12px;
+    background: #1c2128; border-radius: 6px;
+  }
+  .accuracy-item .label { font-size: 12px; color: #8b949e; margin-bottom: 4px; }
+  .accuracy-item .value { font-size: 24px; font-weight: 700; }
+  @media (max-width: 640px) { .grid { grid-template-columns: 1fr; } .grid-4 { grid-template-columns: 1fr 1fr; } }
 </style>
 </head>
 <body>
@@ -125,14 +170,39 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
     <span class="status" id="api-status">检查连接中…</span>
   </header>
 
+  <div class="section-title">📊 全球统计</div>
   <div class="grid" id="global-grid">
     <div class="card"><h3>全球安装</h3><div class="value blue" id="installs">—</div><div class="sub">skill 总安装次数</div></div>
     <div class="card"><h3>每日交互</h3><div class="value green" id="daily">—</div><div class="sub">今日活跃</div></div>
     <div class="card"><h3>覆盖 Skill</h3><div class="value purple" id="covered">—</div><div class="sub">可搜索 Skill 总数</div></div>
   </div>
 
+  <div class="section-title">👤 个人统计</div>
+  <div class="grid-4" id="personal-grid">
+    <div class="card"><h3>我的事件</h3><div class="value pink" id="personal-events">—</div><div class="sub">总操作次数</div></div>
+    <div class="card"><h3>推荐转化</h3><div class="value green" id="personal-conversions">—</div><div class="sub">安装成功数</div></div>
+    <div class="card"><h3>活跃天数</h3><div class="value orange" id="personal-days">—</div><div class="sub">使用天数</div></div>
+    <div class="card"><h3>最后活跃</h3><div class="value blue" id="personal-last">—</div><div class="sub">最近使用时间</div></div>
+  </div>
+
+  <div class="top-skills" id="top-skills-section">
+    <h2>🏆 我的最常用 Skill</h2>
+    <ul class="top-skills-list" id="top-skills-list">
+      <li style="color:#8b949e;">加载中…</li>
+    </ul>
+  </div>
+
+  <div class="accuracy-chart" id="accuracy-section">
+    <h2>🎯 推荐准确率趋势</h2>
+    <div class="accuracy-values" id="accuracy-values">
+      <div class="accuracy-item"><div class="label">整体准确率</div><div class="value green" id="acc-overall">—</div></div>
+      <div class="accuracy-item"><div class="label">7日准确率</div><div class="value blue" id="acc-7d">—</div></div>
+      <div class="accuracy-item"><div class="label">30日准确率</div><div class="value purple" id="acc-30d">—</div></div>
+    </div>
+  </div>
+
   <div class="conversion">
-    <h2>📈 推荐转化漏斗</h2>
+    <h2>📈 推荐转化漏斗 (本地)</h2>
     <div class="funnel" id="funnel">
       <div class="funnel-step" style="background:#1c2128;">
         <div class="label">展示</div><div class="count" id="rec-shown" style="color:#58a6ff;">—</div>
@@ -169,45 +239,100 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
 </div>
 
 <script>
+const API_BASE = 'http://127.0.0.1:3010/api/v1';
+const fp = localStorage.getItem('mapick_fp') || '0000000000000000';
+
 async function fetchJSON(url) {
-  const resp = await fetch(url);
-  if (!resp.ok) throw new Error(resp.statusText);
-  return resp.json();
+  try {
+    const resp = await fetch(url);
+    if (!resp.ok) return null;
+    return resp.json();
+  } catch {
+    return null;
+  }
 }
 
 async function refresh() {
   const apiStatus = document.getElementById('api-status');
   try {
-    const [stats, events] = await Promise.all([
-      fetchJSON('http://127.0.0.1:3010/api/v1/stats/public').catch(() => ({
+    const [stats, events, personal, accuracy] = await Promise.all([
+      fetchJSON(API_BASE + '/stats/public').catch(() => ({
         installs: 0, dailyInteractions: 0, skillsCovered: 0
       })),
       fetchJSON('/api/stats/local').catch(() => ({
         events_logged: 0, rec_shown: 0, rec_clicked: 0,
         rec_installed: 0, conversion_rate: '—', fun_fact: '暂无数据'
       })),
+      fetchJSON(API_BASE + '/stats/user/' + fp).catch(() => null),
+      fetchJSON(API_BASE + '/perception/accuracy-trend').catch(() => null),
     ]);
 
     apiStatus.textContent = '🟢 已连接';
     apiStatus.className = 'status online';
 
+    // Global stats
     document.getElementById('installs').textContent =
-      (stats.installs || 0).toLocaleString();
+      (stats?.installs || 0).toLocaleString();
     document.getElementById('daily').textContent =
-      (stats.dailyInteractions || 0).toLocaleString();
+      (stats?.dailyInteractions || 0).toLocaleString();
     document.getElementById('covered').textContent =
-      (stats.skillsCovered || 0).toLocaleString();
+      (stats?.skillsCovered || 0).toLocaleString();
 
-    const shown = events.rec_shown || 0;
-    const clicked = events.rec_clicked || 0;
-    const installed = events.rec_installed || 0;
-    const total = events.events_logged || 0;
+    // Personal stats
+    if (personal) {
+      document.getElementById('personal-events').textContent =
+        (personal.events || 0).toLocaleString();
+      document.getElementById('personal-conversions').textContent =
+        (personal.conversions || 0).toLocaleString();
+      document.getElementById('personal-days').textContent =
+        personal.activeDays || '—';
+      document.getElementById('personal-last').textContent =
+        personal.lastActive ? new Date(personal.lastActive).toLocaleDateString('zh-CN') : '—';
+
+      // Top skills
+      const topSkillsList = document.getElementById('top-skills-list');
+      if (personal.topSkills && personal.topSkills.length > 0) {
+        topSkillsList.innerHTML = personal.topSkills.slice(0, 5).map((s, i) =>
+          '<li><span class="skill-rank">' + (i + 1) + '</span>' +
+          '<span class="skill-name">' + (s.name || s.skillId || 'Unknown') + '</span>' +
+          '<span class="skill-count">' + (s.count || s.calls || '—') + '次</span></li>'
+        ).join('');
+      } else {
+        topSkillsList.innerHTML = '<li style="color:#8b949e;">暂无常用 Skill 数据</li>';
+      }
+    } else {
+      document.getElementById('personal-events').textContent = '—';
+      document.getElementById('personal-conversions').textContent = '—';
+      document.getElementById('personal-days').textContent = '—';
+      document.getElementById('personal-last').textContent = '—';
+      document.getElementById('top-skills-list').innerHTML = '<li style="color:#8b949e;">个人统计暂不可用</li>';
+    }
+
+    // Accuracy trend
+    if (accuracy) {
+      document.getElementById('acc-overall').textContent =
+        accuracy.overall ? (accuracy.overall * 100).toFixed(1) + '%' : '—';
+      document.getElementById('acc-7d').textContent =
+        accuracy.last7Days ? (accuracy.last7Days * 100).toFixed(1) + '%' : '—';
+      document.getElementById('acc-30d').textContent =
+        accuracy.last30Days ? (accuracy.last30Days * 100).toFixed(1) + '%' : '—';
+    } else {
+      document.getElementById('acc-overall').textContent = '—';
+      document.getElementById('acc-7d').textContent = '—';
+      document.getElementById('acc-30d').textContent = '—';
+    }
+
+    // Local funnel stats
+    const shown = events?.rec_shown || 0;
+    const clicked = events?.rec_clicked || 0;
+    const installed = events?.rec_installed || 0;
+    const total = events?.events_logged || 0;
 
     document.getElementById('rec-shown').textContent = shown || '0';
     document.getElementById('rec-clicked').textContent = clicked || '0';
     document.getElementById('rec-installed').textContent = installed || '0';
     document.getElementById('rate-pct').textContent =
-      events.conversion_rate || (shown > 0 ? Math.round(installed/shown*100) + '%' : '—');
+      events?.conversion_rate || (shown > 0 ? Math.round(installed/shown*100) + '%' : '—');
 
     document.getElementById('t-shown').textContent = shown;
     document.getElementById('t-clicked').textContent = clicked;
@@ -222,7 +347,7 @@ async function refresh() {
       total > 0 ? (installed/total*100).toFixed(1) + '%' : '—';
 
     document.getElementById('fact-text').textContent =
-      events.fun_fact || '暂无冷知识数据';
+      events?.fun_fact || '暂无冷知识数据';
   } catch (err) {
     apiStatus.textContent = '🔴 连接失败';
     apiStatus.className = 'status offline';
@@ -230,6 +355,16 @@ async function refresh() {
   }
 }
 
+// Try to get device fp from shell output
+async function initFp() {
+  try {
+    const resp = await fetch('/api/stats/local');
+    const data = await resp.json();
+    if (data.fp) localStorage.setItem('mapick_fp', data.fp);
+  } catch {}
+}
+
+initFp();
 refresh();
 setInterval(refresh, 30_000);
 </script>

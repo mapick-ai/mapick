@@ -73,6 +73,9 @@ const ALLOWED_ENDPOINTS = [
   /^\/share\/upload$/,
   /^\/skill\/[\w-]+\/(security|report)$/,
   /^\/stats\/public$/,
+  /^\/stats\/user\/[a-f0-9]{16}$/,              // personal stats (Phase 3)
+  /^\/perception\/accuracy-trend$/,             // recommendation accuracy (Phase 3)
+  /^\/perception\/summary$/,                    // perception summary (Phase 3)
   /^\/notify\/daily-check$/,
 ];
 

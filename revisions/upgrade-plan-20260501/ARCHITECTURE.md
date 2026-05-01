@@ -1776,3 +1776,1049 @@ Phase 2 升级聚焦于增强用户体验与透明度：
 ---
 
 *Phase 2 架构方案编写完毕，可进入代码实现阶段。*
+
+---
+
+## 11. Phase 3 升级 — 技术架构方案
+
+**版本**：2026-05-01  
+**范围**：Phase 3 客户端 + 后端改动（G7/G8），Stats Dashboard 增强、Perception 集成  
+**前置**：Phase 2 已完成（G4 proactive_mode、G5 stats token、G6 contextual recommend）
+
+---
+
+### 11.1 模块变更总览
+
+| 模块 | 改动类型 | 变更内容 |
+|------|----------|----------|
+| `scripts/lib/stats.js` | **改动** | 新增 `handleStatsDetail()`：三路数据合并（本地 token + 后端 stats + perception） |
+| `scripts/lib/core.js` | **改动** | 新增 `fetchUserStats()` / `fetchPerceptionTrend()` / `fetchPerceptionSummary()` 网络请求 helper |
+| `scripts/lib/http.js` | **改动** | `ALLOWED_ENDPOINTS` 新增 3 条正则 |
+| `scripts/shell.js` | **改动** | 新增 `stats --detail` / `--period` / `--compact` 参数解析与路由 |
+| `scripts/lib/notify.js` | **改动** | `handleNotifyDaily()` 集成 `GET /perception/summary` 到 daily digest JSON |
+| `SKILL.md` | **改动** | 新增 §16 Stats Dashboard 渲染规则、§17 Perception 渲染规则 |
+| **后端** | **新增** | `src/modules/stats/` 模块（controller + service）、`GET /stats/user/:userId` 端点 |
+
+---
+
+### 11.2 后端新模块：`src/modules/stats/`
+
+#### 11.2.1 模块结构
+
+```
+src/modules/stats/
+├── stats.module.ts          # NestJS module 注册
+├── stats.controller.ts      # GET /stats/user/:userId
+├── stats.service.ts         # 聚合 events 表 + 查询逻辑
+├── dto/
+│   └── user-stats.dto.ts    # 请求参数 DTO（period, includeTrend）
+└── interfaces/
+    └── user-stats.interface.ts  # 响应类型定义
+```
+
+#### 11.2.2 Controller 设计
+
+```typescript
+// src/modules/stats/stats.controller.ts
+
+@Controller("stats")
+export class StatsController {
+  constructor(private readonly statsService: StatsService) {}
+
+  @Get("user/:userId")
+  async getUserStats(
+    @Param("userId") userId: string,
+    @Query("period") period: string,
+    @Query("includeTrend") includeTrend: string,
+    @Headers("x-device-fp") deviceFp: string,
+  ): Promise<UserStatsResponse> {
+    // 1. 认证校验
+    const isValid = await this.authService.validateDeviceFp(deviceFp, userId);
+    if (!isValid) throw new ForbiddenException("Device FP does not match user");
+
+    // 2. 周期参数校验与默认值
+    const validPeriods = ["7d", "30d", "90d"];
+    const resolvedPeriod = validPeriods.includes(period) ? period : "30d";
+    const shouldIncludeTrend = includeTrend !== "false"; // 默认 true
+
+    // 3. 调用 service 聚合数据
+    return this.statsService.aggregateUserStats(userId, resolvedPeriod, shouldIncludeTrend);
+  }
+}
+```
+
+**端点认证流**：
+```
+Client Request (x-device-fp: abc123)
+    │
+    ▼
+Controller: validateDeviceFp(abc123, userId)
+    │
+    ├─ 查询 device_fp ↔ user 绑定关系 (users 表)
+    │
+    ├─ 匹配 → 允许
+    │
+    └─ 不匹配 → 403 Forbidden
+```
+
+#### 11.2.3 Service 设计
+
+```typescript
+// src/modules/stats/stats.service.ts
+
+@Injectable()
+export class StatsService {
+  constructor(
+    @InjectRepository(Event) private eventRepo: Repository<Event>,
+    @InjectRepository(UserSkill) private userSkillRepo: Repository<UserSkill>,
+  ) {}
+
+  async aggregateUserStats(
+    userId: string,
+    period: string,      // "7d" | "30d" | "90d"
+    includeTrend: boolean,
+  ): Promise<UserStatsResponse> {
+    const range = this.resolveDateRange(period);
+
+    // 并行查询所有聚合指标
+    const [
+      eventsTotal,
+      eventsByType,
+      recommendMetrics,
+      activeDays,
+      topSkills,
+      installTrend,
+      categoryDistribution,
+    ] = await Promise.all([
+      this.countTotalEvents(userId, range),
+      this.countEventsByType(userId, range),
+      this.computeRecommendFunnel(userId, range),
+      this.countActiveDays(userId, range),
+      this.getTopSkills(userId, range, 5),
+      includeTrend ? this.computeInstallTrend(userId, range) : [],
+      this.getCategoryDistribution(userId),
+    ]);
+
+    return {
+      userId,
+      period: { from: range.from.toISOString(), to: range.to.toISOString(), days: range.days },
+      stats: {
+        eventsTotal,
+        eventsByType,
+        ...recommendMetrics,
+        activeDays,
+        activeDaysRatio: activeDays / range.days,
+        topSkills,
+        installTrend,
+        categoryDistribution,
+      },
+      generatedAt: new Date().toISOString(),
+    };
+  }
+
+  private resolveDateRange(period: string): DateRange {
+    const to = new Date();
+    const days = period === "7d" ? 7 : period === "90d" ? 90 : 30;
+    const from = new Date(to.getTime() - days * 86400000);
+    return { from, to, days };
+  }
+
+  private async countTotalEvents(userId: string, range: DateRange): Promise<number> {
+    return this.eventRepo.count({
+      where: { userId, createdAt: Between(range.from, range.to) },
+    });
+  }
+
+  private async countEventsByType(userId: string, range: DateRange): Promise<Record<string, number>> {
+    return this.eventRepo
+      .createQueryBuilder("e")
+      .select("e.eventType", "type")
+      .addSelect("COUNT(*)", "count")
+      .where("e.userId = :userId", { userId })
+      .andWhere("e.createdAt BETWEEN :from AND :to", { from: range.from, to: range.to })
+      .groupBy("e.eventType")
+      .getRawMany()
+      .then(rows => Object.fromEntries(rows.map(r => [r.type, parseInt(r.count)])));
+  }
+
+  private async computeRecommendFunnel(userId: string, range: DateRange): Promise<{
+    recommendShown: number;
+    recommendClicked: number;
+    recommendInstalled: number;
+    conversionRate: { click_through: number; install_rate: number; overall: number };
+  }> {
+    const [shown, clicked, installed] = await Promise.all([
+      this.eventRepo.count({ where: { userId, eventType: "recommend_view", createdAt: Between(range.from, range.to) } }),
+      this.eventRepo.count({ where: { userId, eventType: "recommend_click", createdAt: Between(range.from, range.to) } }),
+      this.eventRepo.count({ where: { userId, eventType: "recommend_install", createdAt: Between(range.from, range.to) } }),
+    ]);
+
+    return {
+      recommendShown: shown,
+      recommendClicked: clicked,
+      recommendInstalled: installed,
+      conversionRate: {
+        click_through: shown > 0 ? +(clicked / shown).toFixed(4) : 0,
+        install_rate: clicked > 0 ? +(installed / clicked).toFixed(4) : 0,
+        overall: shown > 0 ? +(installed / shown).toFixed(4) : 0,
+      },
+    };
+  }
+
+  private async countActiveDays(userId: string, range: DateRange): Promise<number> {
+    const result = await this.eventRepo
+      .createQueryBuilder("e")
+      .select("DATE(e.createdAt)", "date")
+      .where("e.userId = :userId", { userId })
+      .andWhere("e.createdAt BETWEEN :from AND :to", { from: range.from, to: range.to })
+      .groupBy("DATE(e.createdAt)")
+      .getRawMany();
+    return result.length;
+  }
+
+  private async getTopSkills(userId: string, range: DateRange, limit: number): Promise<TopSkill[]> {
+    return this.eventRepo
+      .createQueryBuilder("e")
+      .select("e.skillSlug", "slug")
+      .addSelect("e.skillName", "name")
+      .addSelect("e.category", "category")
+      .addSelect("COUNT(*)", "interactions")
+      .where("e.userId = :userId", { userId })
+      .andWhere("e.createdAt BETWEEN :from AND :to", { from: range.from, to: range.to })
+      .andWhere("e.skillSlug IS NOT NULL")
+      .groupBy("e.skillSlug")
+      .addGroupBy("e.skillName")
+      .addGroupBy("e.category")
+      .orderBy("interactions", "DESC")
+      .limit(limit)
+      .getRawMany()
+      .then(rows => rows.map(r => ({
+        slug: r.slug,
+        name: r.name,
+        interactions: parseInt(r.interactions),
+        category: r.category,
+      })));
+  }
+
+  private async computeInstallTrend(userId: string, range: DateRange): Promise<InstallTrendItem[]> {
+    const rows = await this.eventRepo
+      .createQueryBuilder("e")
+      .select("DATE_TRUNC('week', e.createdAt)", "week")
+      .addSelect("COUNT(*)", "count")
+      .where("e.userId = :userId", { userId })
+      .andWhere("e.eventType = 'install'")
+      .andWhere("e.createdAt BETWEEN :from AND :to", { from: range.from, to: range.to })
+      .groupBy("DATE_TRUNC('week', e.createdAt)")
+      .orderBy("week", "ASC")
+      .getRawMany();
+
+    let cumulative = 0;
+    return rows.map(r => {
+      cumulative += parseInt(r.count);
+      return { week: this.formatISOWeek(r.week), count: parseInt(r.count), cumulative };
+    });
+  }
+
+  private async getCategoryDistribution(userId: string): Promise<Record<string, number>> {
+    const rows = await this.userSkillRepo
+      .createQueryBuilder("us")
+      .select("us.category", "category")
+      .addSelect("COUNT(*)", "count")
+      .where("us.userId = :userId", { userId })
+      .andWhere("us.status = 'active'")
+      .groupBy("us.category")
+      .getRawMany();
+    return Object.fromEntries(rows.map(r => [r.category, parseInt(r.count)]));
+  }
+}
+
+// 类型定义
+interface DateRange { from: Date; to: Date; days: number; }
+interface TopSkill { slug: string; name: string; interactions: number; category: string; }
+interface InstallTrendItem { week: string; count: number; cumulative: number; }
+
+interface UserStatsResponse {
+  userId: string;
+  period: { from: string; to: string; days: number; };
+  stats: {
+    eventsTotal: number;
+    eventsByType: Record<string, number>;
+    recommendShown: number;
+    recommendClicked: number;
+    recommendInstalled: number;
+    conversionRate: { click_through: number; install_rate: number; overall: number; };
+    activeDays: number;
+    activeDaysRatio: number;
+    topSkills: TopSkill[];
+    installTrend: InstallTrendItem[];
+    categoryDistribution: Record<string, number>;
+  };
+  generatedAt: string;
+}
+```
+
+#### 11.2.4 Service 查询性能优化
+
+| 查询 | 数据量级 | 优化策略 |
+|------|---------|---------|
+| `countTotalEvents` | 单用户最多 ~10K 行/月 (events 表) | 索引：`(userId, createdAt)` |
+| `countEventsByType` | 同上 | 同一索引 + `GROUP BY eventType` |
+| `countActiveDays` | 同上 | `DISTINCT DATE(createdAt)` — 索引覆盖 |
+| `getTopSkills` | 同上 | 索引：`(userId, createdAt, skillSlug)` |
+| `computeInstallTrend` | 单用户最多 ~500 行/月 | `DATE_TRUNC` + 索引 |
+| `getCategoryDistribution` | 查询 `user_skills` 表 (小表) | `(userId, status)` 索引 |
+
+**后端性能目标**：
+- 所有查询在单次请求中完成（并行 `Promise.all`）
+- p95 响应时间 ≤ 500ms（单用户数据量 ≤ 100K events）
+- 数据库层建立覆盖索引确保查询不走全表扫描
+
+---
+
+### 11.3 `GET /stats/user/:userId` 端点契约
+
+#### 11.3.1 端点规范
+
+| 属性 | 值 |
+|------|-----|
+| **方法** | `GET` |
+| **路径** | `/api/v1/stats/user/:userId` |
+| **认证** | Device FP（via `x-device-fp` header），`userId` 必须与 `x-device-fp` 绑定的用户一致 |
+| **查询参数** | `period`（可选，`7d` / `30d` / `90d`，默认 `30d`）、`includeTrend`（可选，`true` / `false`，默认 `true`） |
+| **成功响应** | `200 OK`，JSON body（见 11.2.3 `UserStatsResponse`） |
+| **错误响应** | `401` — 缺失 `x-device-fp` header；`403` — userId 与 device FP 不匹配；`404` — 用户不存在；`500` — 内部错误 |
+| **频率限制** | 10 req/min per device FP |
+| **缓存建议** | 响应头 `Cache-Control: private, max-age=300`（客户端 5 分钟缓存）；可选 `ETag` 支持 |
+
+#### 11.3.2 认证流程
+
+```
+Client sends: GET /stats/user/a1b2c3d4e5f6g7h8
+              x-device-fp: <16-char hex>
+
+Server:
+  1. 查 events 表: SELECT userId FROM events WHERE deviceFp = :fp LIMIT 1
+  2. 比较 userId 与 URL param 中的 userId
+  3. 不匹配 → 403 {"error": "forbidden", "message": "userId does not match device fingerprint"}
+  4. 匹配 → 继续查询
+```
+
+#### 11.3.3 数据库依赖
+
+| 表 | 用途 | 关键字段 |
+|------|------|---------|
+| `events` | 存放所有用户行为事件 | `userId`, `eventType`, `skillSlug`, `skillName`, `category`, `createdAt`, `deviceFp` |
+| `user_skills` | 用户当前已安装技能 | `userId`, `slug`, `category`, `status` |
+
+**索引要求**：
+```
+events:
+  - (userId, createdAt)              -- 时间范围 + 计数查询
+  - (userId, eventType, createdAt)   -- 按事件类型聚合
+  - (userId, skillSlug, createdAt)   -- top skills 排名
+
+user_skills:
+  - (userId, status)                 -- 类别分布查询
+```
+
+---
+
+### 11.4 Perception 端点集成
+
+#### 11.4.1 `GET /perception/accuracy-trend` 集成
+
+**端点**（后端已有，客户端首次接入）：
+
+| 属性 | 值 |
+|------|-----|
+| **方法** | `GET` |
+| **路径** | `/api/v1/perception/accuracy-trend` |
+| **认证** | Device FP（via `x-device-fp` header） |
+| **查询参数** | `period`（可选，`7d`/`30d`/`90d`，默认 `30d`） |
+| **缓存** | 客户端 10 分钟缓存 |
+
+**客户端调用位置**：`scripts/lib/stats.js` → `handleStatsDetail()` → 三路并行请求之一
+
+```javascript
+// scripts/lib/core.js 中的新 helper
+async function fetchPerceptionTrend(period = "30d") {
+  const url = `/perception/accuracy-trend?period=${encodeURIComponent(period)}`;
+  return httpCall("GET", url);
+}
+```
+
+#### 11.4.2 `GET /perception/summary` 集成
+
+**端点**（后端已有，客户端首次接入）：
+
+| 属性 | 值 |
+|------|-----|
+| **方法** | `GET` |
+| **路径** | `/api/v1/perception/summary` |
+| **认证** | Device FP（via `x-device-fp` header） |
+| **查询参数** | 无 |
+| **缓存** | 客户端 30 分钟缓存（数据变化频率低） |
+
+**客户端调用位置**：`scripts/lib/notify.js` → `handleNotifyDaily()`
+
+```javascript
+// scripts/lib/core.js 中的新 helper
+async function fetchPerceptionSummary() {
+  return httpCall("GET", "/perception/summary");
+}
+```
+
+#### 11.4.3 降级策略实现
+
+```
+stats --detail
+    │
+    ├── (1) 本地 token 解析 ─────────────── 失败 → local.tokenReport = null
+    │                                          ├─ 记录日志
+    │                                          └─ 继续
+    │
+    ├── (2) GET /stats/user/:userId ──────── 失败 (超时 2s / 4xx / 5xx)
+    │                                          ├─ remoteFallback = true
+    │                                          ├─ 记录 remoteFallbackReason
+    │                                          └─ 继续
+    │
+    └── (3) GET /perception/accuracy-trend ─ 失败 (超时 2s / 4xx / 5xx)
+                                               ├─ perceptionFallback = true
+                                               ├─ 记录 perceptionFallbackReason
+                                               └─ 继续
+
+最终返回合并 JSON（缺失部分置 null）
+```
+
+**降级时的 AI 渲染行为**（参见 DESIGN.md §1.4）：
+
+| 数据状况 | 渲染策略 |
+|---------|---------|
+| 仅本地 token 可用 | 显示 token 列 + "后端数据暂时不可用" |
+| 后端 stats 可用，perception 不可用 | 显示 stats 列 + token 列，perception 列留空 |
+| 全部不可用 | 显示单一错误卡片 |
+
+---
+
+### 11.5 ALLOWED_ENDPOINTS 变更
+
+#### 11.5.1 完整 diff
+
+```diff
+  // scripts/lib/http.js
+  const ALLOWED_ENDPOINTS = [
+    /^\/assistant\/(status|workflow|daily-digest|weekly)\/[a-f0-9]{16}$/,
+    /^\/recommendations\/(feed|track)$/,
+    /^\/recommendations\/contextual$/,        // Phase 2
+    /^\/skills\/live-search$/,
+    /^\/skills\/check-updates$/,
+    /^\/users\/[a-f0-9]{16}\/(zombies|profile-text)$/,
++   /^\/stats\/user\/[a-f0-9]{16}$/,          // Phase 3 — G7
+    /^\/users\/(trusted-skills|data|consent)$/,
+    /^\/events\/track$/,
+    /^\/bundle$/,
+    /^\/bundle\/seed$/,
+    /^\/bundle\/recommend\/list$/,
+    /^\/bundle\/[\w-]+$/,
+    /^\/bundle\/[\w-]+\/install$/,
+    /^\/report\/persona$/,
+    /^\/share\/upload$/,
+    /^\/skill\/[\w-]+\/(security|report)$/,
+    /^\/stats\/public$/,
++   /^\/perception\/accuracy-trend$/,         // Phase 3 — G8
++   /^\/perception\/summary$/,                // Phase 3 — G8
+    /^\/notify\/daily-check$/,
+  ];
+```
+
+#### 11.5.2 新增端点汇总
+
+| # | 正则 | 来源 | 用途 |
+|:-:|------|:---:|------|
+| — | `/^\/stats\/user\/[a-f0-9]{16}$/` | G7 | 获取个人 stats 全貌 |
+| — | `/^\/perception\/accuracy-trend$/` | G8 | 获取推荐准确率趋势 |
+| — | `/^\/perception\/summary$/` | G8 | 获取感知摘要（daily digest） |
+
+**总计**：ALLOWED_ENDPOINTS 从 Phase 2 的 21 条增加至 **24 条**。
+
+---
+
+### 11.6 完整数据流：后端 DB → API → 客户端 Shell → Dashboard HTML
+
+```
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                    Phase 3 Stats Dashboard Full Data Flow                       │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+  ┌─────────────────────────────────┐
+  │         Backend Database         │
+  │                                 │
+  │  ┌───────────────────────────┐  │
+  │  │      events 表             │  │
+  │  │  ┌─────────────────────┐  │  │
+  │  │  │ userId              │  │  │
+  │  │  │ eventType           │  │  │
+  │  │  │ skillSlug           │  │  │
+  │  │  │ skillName           │  │  │
+  │  │  │ category            │  │  │
+  │  │  │ createdAt           │  │  │
+  │  │  │ deviceFp            │  │  │
+  │  │  └─────────────────────┘  │  │
+  │  └───────────────────────────┘  │
+  │                                 │
+  │  ┌───────────────────────────┐  │
+  │  │    user_skills 表          │  │
+  │  │  ┌─────────────────────┐  │  │
+  │  │  │ userId              │  │  │
+  │  │  │ slug                │  │  │
+  │  │  │ category            │  │  │
+  │  │  │ status              │  │  │
+  │  │  └─────────────────────┘  │  │
+  │  └───────────────────────────┘  │
+  └────────────────┬────────────────┘
+                   │
+                   │ SQL queries (by StatsService)
+                   │
+                   ▼
+  ┌─────────────────────────────────┐
+  │    NestJS StatsController        │
+  │                                 │
+  │  GET /stats/user/:userId         │
+  │    ?period=30d                   │
+  │    &includeTrend=true            │
+  │    x-device-fp: abc123           │
+  │                                 │
+  │  1. Auth: validate device FP    │
+  │  2. Call StatsService            │
+  │  3. Return JSON response         │
+  └────────────────┬────────────────┘
+                   │
+                   │ HTTP 200 JSON
+                   │
+                   ▼
+  ┌─────────────────────────────────┐
+  │     Mapick Client Shell          │
+  │     (scripts/shell.js)           │
+  │                                 │
+  │  $ stats --detail                │
+  │     --period 30d                 │
+  │                                 │
+  │  ┌───────────────────────────┐  │
+  │  │   handleStatsDetail()      │  │
+  │  │   (scripts/lib/stats.js)   │  │
+  │  │                           │  │
+  │  │  // 三路并行请求           │  │
+  │  │  const [token, stats,    │  │
+  │  │    perception] = await    │  │
+  │  │    Promise.allSettled([   │  │
+  │  │   (1) parseLocalToken()  │  │
+  │  │     → ~/sessions/*.jsonl │  │
+  │  │   (2) fetchUserStats()   │  │
+  │  │     → GET /stats/user/   │  │
+  │  │   (3) fetchPerception()  │  │
+  │  │     → GET /perception/   │  │
+  │  │     accuracy-trend        │  │
+  │  │  ]);                     │  │
+  │  │                           │  │
+  │  │  // 合并 + 降级处理        │  │
+  │  │  return mergeResults(    │  │
+  │  │    token, stats,          │  │
+  │  │    perception             │  │
+  │  │  );                       │  │
+  │  └───────────────────────────┘  │
+  └────────────────┬────────────────┘
+                   │
+                   │ JSON → stdout
+                   │
+                   ▼
+  ┌─────────────────────────────────┐
+  │         AI (OpenClaw)           │
+  │                                 │
+  │  Receives: { intent:            │
+  │    "stats:detail", ... }        │
+  │                                 │
+  │  Renders → Dashboard HTML       │
+  │  (per SKILL.md §16 rules)       │
+  └────────────────┬────────────────┘
+                   │
+                   ▼
+  ┌─────────────────────────────────┐
+  │       User sees Dashboard       │
+  │                                 │
+  │  📊 Mapick 使用全景 — 过去 30 天  │
+  │  ┌─────────┬─────────┬────────┐ │
+  │  │ Global  │ Personal │ Percep │ │
+  │  │ Overview│  Stats   │Insights│ │
+  │  │         │         │        │ │
+  │  │ 💰 Token│ 🎯漏斗   │ 📐准确率│ │
+  │  │ 📈趋势   │ ⭐Skills │ 趋势    │ │
+  │  │ 👤活跃度 │ 🏷️类别   │ 💡洞察  │ │
+  │  └─────────┴─────────┴────────┘ │
+  └─────────────────────────────────┘
+```
+
+### 11.7 客户端实现细节
+
+#### 11.7.1 `scripts/lib/stats.js` — `handleStatsDetail()`
+
+```javascript
+const { readConfig } = require("./core");
+const { httpCall } = require("./http");
+const { aggregateTokenUsage, summarizeTokenUsage, getStartDate } = require("./token");
+
+async function handleStatsDetail(args) {
+  // 参数解析
+  const periodIdx = args.indexOf("--period");
+  const period = periodIdx >= 0 ? args[periodIdx + 1] : "30d";
+  const compact = args.includes("--compact");
+  const validPeriods = ["7d", "30d", "90d"];
+  const resolvedPeriod = validPeriods.includes(period) ? period : "30d";
+
+  const config = readConfig();
+  const userId = config.user_id;
+  if (!userId) {
+    return {
+      intent: "stats:detail",
+      period: resolvedPeriod,
+      error: "user_id_not_found",
+      hint: "User ID not found in CONFIG.md. Ensure Mapick has been initialized.",
+    };
+  }
+
+  // 三路并行请求（allSettled 确保部分失败不阻塞）
+  const [tokenResult, statsResult, perceptionResult] = await Promise.allSettled([
+    // (1) 本地 token 解析
+    (async () => {
+      const sinceDate = getStartDate(resolvedPeriod);
+      const records = aggregateTokenUsage(sinceDate);
+      const summary = summarizeTokenUsage(records);
+      return { ...summary, source: { sessions_scanned: records.length } };
+    })(),
+    // (2) 后端 user stats
+    httpCall("GET", `/stats/user/${userId}?period=${resolvedPeriod}&includeTrend=true`),
+    // (3) 后端 perception accuracy-trend
+    httpCall("GET", `/perception/accuracy-trend?period=${resolvedPeriod}`),
+  ]);
+
+  // 合并结果 + 降级标记
+  const local = tokenResult.status === "fulfilled"
+    ? { tokenReport: tokenResult.value, parsedAt: new Date().toISOString() }
+    : { tokenReport: null, error: tokenResult.reason?.message };
+
+  let remote = null;
+  let remoteFallback = false;
+  let remoteFallbackReason = null;
+  let perceptionFallback = false;
+  let perceptionFallbackReason = null;
+
+  if (statsResult.status === "fulfilled" && !statsResult.value.error) {
+    remote = {
+      userStats: statsResult.value,
+      perception: perceptionResult.status === "fulfilled" ? perceptionResult.value : null,
+      source: "api",
+      fetchedAt: new Date().toISOString(),
+    };
+    if (perceptionResult.status === "rejected") {
+      perceptionFallback = true;
+      perceptionFallbackReason = perceptionResult.reason?.message || "Unknown error";
+    }
+  } else {
+    remoteFallback = true;
+    remoteFallbackReason = statsResult.status === "rejected"
+      ? statsResult.reason?.message
+      : `GET /stats/user/${userId} returned ${statsResult.value?.status || "unknown"}`;
+  }
+
+  const result = {
+    intent: "stats:detail",
+    period: resolvedPeriod,
+    from: getStartDate(resolvedPeriod),
+    to: new Date().toISOString(),
+    local,
+    remote,
+    remoteFallback,
+    perceptionFallback,
+    generatedAt: new Date().toISOString(),
+  };
+
+  if (remoteFallbackReason) result.remoteFallbackReason = remoteFallbackReason;
+  if (perceptionFallbackReason) result.perceptionFallbackReason = perceptionFallbackReason;
+
+  return result;
+}
+```
+
+#### 11.7.2 `scripts/lib/notify.js` — Daily Digest Perception 集成
+
+```javascript
+// handleNotifyDaily() 扩展
+async function handleNotifyDaily(_args, ctx) {
+  // ... 现有 logic (radar + token_snapshot + alerts) ...
+
+  const digest = {
+    intent: "notify:daily",
+    radar: radarResult,
+    token_snapshot: tokenSnapshot,
+    alerts: notifyAlerts,
+    perception: null,  // 新增字段
+  };
+
+  // 仅 helpful 模式下获取 perception summary
+  const proactiveMode = readProactiveMode();
+  if (proactiveMode === "helpful") {
+    try {
+      const perceptionSummary = await httpCall("GET", "/perception/summary");
+      if (perceptionSummary && !perceptionSummary.error) {
+        digest.perception = {
+          overallAccuracy: perceptionSummary.overallAccuracy,
+          trendDirection: perceptionSummary.trendDirection,
+          trendDelta: perceptionSummary.trendDelta,
+          topCorrectCategories: perceptionSummary.topCorrectCategories?.slice(0, 2),
+          topMissedCategories: perceptionSummary.topMissedCategories?.slice(0, 2),
+          insights: perceptionSummary.insights?.slice(0, 1), // 最多 1 条洞察
+        };
+      }
+    } catch {
+      // 静默跳过 — perception 数据不可用不影响核心 digest
+    }
+  }
+
+  return digest;
+}
+```
+
+#### 11.7.3 `scripts/shell.js` — 路由扩展
+
+```javascript
+// shell.js 中 stats 子命令路由
+if (command === "stats") {
+  const sub = args[0] || "";
+
+  // Phase 2: stats token [today|week]
+  if (sub === "token") {
+    const { handleStatsToken } = require("./lib/token");
+    return handleStatsToken(args.slice(1));
+  }
+
+  // Phase 3: stats --detail [--period 7d|30d|90d] [--compact]
+  if (args.includes("--detail")) {
+    const { handleStatsDetail } = require("./lib/stats");
+    return handleStatsDetail(args);
+  }
+
+  // 原有 stats 命令
+  const { handleStats } = require("./lib/misc");
+  return handleStats();
+}
+```
+
+---
+
+### 11.8 错误处理策略
+
+#### 11.8.1 Stats Dashboard 错误矩阵
+
+| 失败点 | 错误类型 | Fallback 策略 |
+|--------|----------|----------------|
+| `userId` 不存在于 CONFIG.md | 本地配置缺失 | 返回 `error: "user_id_not_found"` + hint |
+| 本地 token 解析失败 | JSONL 文件损坏/不存在 | `local.tokenReport: null`，记录 `local.error` |
+| `GET /stats/user/:userId` 2s 超时 | 网络超时 | `remoteFallback: true`，仅展示本地 token 数据 |
+| `GET /stats/user/:userId` 返回 401/403 | 认证失败 | `remoteFallback: true` + 原因说明，不重试 |
+| `GET /stats/user/:userId` 返回 404 | 用户不存在 | `remoteFallback: true` + "暂无数据，使用一段时间后查看" |
+| `GET /stats/user/:userId` 返回 500 | 服务端错误 | `remoteFallback: true` + "后端暂时不可用" |
+| `GET /stats/user/:userId` 返回 429 | 频率限制 | `remoteFallback: true` + "请求过于频繁，请稍后重试" |
+| `GET /perception/accuracy-trend` 2s 超时 | 网络超时 | `perceptionFallback: true`，跳过感知列 |
+| `GET /perception/accuracy-trend` 返回 5xx | 服务端错误 | 同上 |
+| 所有请求均失败 | 完全不可用 | 返回统一错误卡片 |
+
+#### 11.8.2 Daily Digest Perception 错误矩阵
+
+| 失败点 | 错误类型 | Fallback 策略 |
+|--------|----------|----------------|
+| `GET /perception/summary` 请求失败 | 网络/服务端错误 | 静默跳过 — `digest.perception = null` |
+| `GET /perception/summary` 返回 429 | 频率限制 | 静默跳过 |
+| `GET /perception/summary` 响应格式异常 | 解析错误 | 静默跳过（`try/catch` 包裹） |
+| `proactive_mode !== "helpful"` | 模式不匹配 | 不请求 perception，`digest.perception = null` |
+
+#### 11.8.3 新增后端端点错误处理
+
+| HTTP 状态码 | 含义 | 客户端行为 |
+|:----------:|------|-----------|
+| 200 | 成功 | 正常解析 |
+| 400 | 参数错误（如 period=invalid） | 返回 `error: "invalid_params"` |
+| 401 | 缺少 x-device-fp header | 返回 `error: "unauthorized"` |
+| 403 | userId 不匹配 device FP | 返回 `error: "forbidden"`，不重试 |
+| 404 | 用户不存在（userId 不在 users 表） | 返回 `error: "user_not_found"`，提示使用一段时间后查看 |
+| 429 | 频率限制（>10 req/min） | 返回 `error: "rate_limited"`，提示稍后重试 |
+| 500 | 服务端内部错误 | 降级到本地 token 数据 |
+
+---
+
+### 11.9 性能与缓存策略
+
+#### 11.9.1 客户端缓存
+
+| 数据 | 缓存 TTL | 缓存 Key | 存储位置 |
+|------|:------:|---------|---------|
+| 本地 token 解析 (today) | 1 小时 | `token_stats_today` | `~/.mapick/cache/` |
+| 本地 token 解析 (week) | 1 小时 | `token_stats_week` | `~/.mapick/cache/` |
+| `GET /stats/user/:userId` | 5 分钟 | `user_stats_{userId}_{period}` | `~/.mapick/cache/` |
+| `GET /perception/accuracy-trend` | 10 分钟 | `perception_trend_{period}` | `~/.mapick/cache/` |
+| `GET /perception/summary` | 30 分钟 | `perception_summary` | `~/.mapick/cache/` |
+
+#### 11.9.2 请求超时设置
+
+```javascript
+// httpCall 调用时设置 timeout
+function httpCall(method, url, body, intent, timeout = 2000) {
+  // ...
+  // stats 和 perception 类请求使用 2s 超时
+  // 超时后触发 remoteFallback / perceptionFallback
+}
+```
+
+| 请求 | 超时时间 | 理由 |
+|------|:------:|------|
+| `GET /stats/user/:userId` | 2s | 聚合查询可能较重，但 p95 应在 500ms 内 |
+| `GET /perception/accuracy-trend` | 2s | 后端查询 + 传输，p95 应在 300ms 内 |
+| `GET /perception/summary` | 2s | 轻量查询，p95 应在 200ms 内 |
+
+---
+
+### 11.10 模块交互图
+
+```
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                      Phase 3 Module Interaction Map                            │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────┐     ┌──────────────────────┐     ┌──────────────────────┐
+│    Backend DB         │     │   Backend API         │     │   Client Shell       │
+│                      │     │                      │     │                      │
+│ ┌────────────────┐   │     │ ┌────────────────┐   │     │ ┌────────────────┐   │
+│ │ events 表       │   │     │ │ StatsController│   │     │ │ shell.js       │   │
+│ │ - userId        │◄──┼─────│→│ GET /stats/    │   │     │ │ stats --detail │   │
+│ │ - eventType     │   │     │ │ user/:userId   │───┼─────│→│                │   │
+│ │ - skillSlug     │   │     │ └────────────────┘   │     │ └───────┬────────┘   │
+│ │ - createdAt     │   │     │                      │     │         │            │
+│ └────────────────┘   │     │ (已有)                │     │         ▼            │
+│                      │     │ ┌────────────────┐   │     │ ┌────────────────┐   │
+│ ┌────────────────┐   │     │ │ Perception     │   │     │ │ stats.js       │   │
+│ │ user_skills 表  │   │     │ │ Controller     │   │     │ │ handleStats    │   │
+│ │ - userId        │   │     │ │ GET /percep-   │   │     │ │ Detail()       │   │
+│ │ - slug          │   │     │ │ tion/accuracy- │───┼─────│→│                │   │
+│ │ - category      │   │     │ │ -trend         │   │     │ │ ┌────────────┐ │   │
+│ │ - status        │   │     │ │ GET /percep-   │   │     │ │ │ 本地 token  │ │   │
+│ └────────────────┘   │     │ │ tion/summary   │───┼─────│→│ │ │ 解析       │ │   │
+└──────────────────────┘     │ └────────────────┘   │     │ │ └────────────┘ │   │
+                             └──────────────────────┘     │ │ ┌────────────┐ │   │
+                                                          │ │ │ GET /stats │ │   │
+                                                          │ │ │ /user/     │ │   │
+                                                          │ │ └────────────┘ │   │
+                                                          │ │ ┌────────────┐ │   │
+                                                          │ │ │ GET /per-  │ │   │
+                                                          │ │ │ ception/   │ │   │
+                                                          │ │ │ accuracy-  │ │   │
+                                                          │ │ │ trend      │ │   │
+                                                          │ │ └────────────┘ │   │
+                                                          │ │                │   │
+                                                          │ │ → 合并 JSON   │   │
+                                                          │ └────────────────┘   │
+                                                          │         │            │
+                                                          │         ▼            │
+                                                          │ ┌────────────────┐   │
+                                                          │ │ notify.js      │   │
+                                                          │ │ handleNotify   │   │
+                                                          │ │ Daily()        │   │
+                                                          │ │                │   │
+                                                          │ │ + perception   │   │
+                                                          │ │   summary      │   │
+                                                          │ └────────────────┘   │
+                                                          │                      │
+                                                          │ ┌────────────────┐   │
+                                                          │ │ http.js        │   │
+                                                          │ │ ALLOWED_       │   │
+                                                          │ │ ENDPOINTS      │   │
+                                                          │ │ + 3 new        │   │
+                                                          │ │ patterns       │   │
+                                                          │ └────────────────┘   │
+                                                          └──────────────────────┘
+                                                                    │
+                                                                    │ JSON → stdout
+                                                                    ▼
+                                                          ┌──────────────────────┐
+                                                          │   AI (OpenClaw)      │
+                                                          │                      │
+                                                          │   Render Dashboard   │
+                                                          │   (3-column grid)    │
+                                                          └──────────────────────┘
+
+  ┌─────────────────────────────────────────────────────────────────────────┐
+  │                          Perception in Daily Digest                       │
+  └─────────────────────────────────────────────────────────────────────────┘
+
+  notify daily trigger (cron / manual)
+      │
+      ├─ handleNotifyDaily()
+      │   ├─ radar scan
+      │   ├─ token snapshot
+      │   ├─ version/zombie alerts
+      │   └─ IF proactive_mode === "helpful":
+      │       └─ GET /perception/summary (try/catch)
+      │           └─ 成功 → append to digest JSON
+      │           └─ 失败 → silent skip (digest.perception = null)
+      │
+      └─ stdout JSON → AI renders daily digest
+```
+
+---
+
+### 11.11 影响分析
+
+#### 11.11.1 现有模块影响
+
+| 模块 | 影响程度 | 改动范围 |
+|------|:------:|---------|
+| `stats.js` | **高** | 新增 `handleStatsDetail()` 函数 + 三路合并逻辑 |
+| `core.js` | **低** | 新增 3 个网络请求 helper 函数 |
+| `http.js` | **低** | Allowlist 新增 3 条正则 |
+| `shell.js` | **低** | `stats` 子路由新增 `--detail` flag 解析 |
+| `notify.js` | **低** | `handleNotifyDaily()` 新增 perception 获取 + 合并 |
+| `SKILL.md` | **中** | 新增 §16、§17 渲染规则 |
+| **后端** | **高** | 新建 `src/modules/stats/` 模块 |
+
+#### 11.11.2 新增依赖
+
+| 依赖 | 来源 | 用途 |
+|------|------|------|
+| 后端 `events` 表 | 已有 | G7 stats 聚合（eventsTotal / eventsByType / topSkills） |
+| 后端 `user_skills` 表 | 已有 | G7 类别分布（categoryDistribution） |
+| `GET /stats/user/:userId` | **新增** | G7 核心数据源 |
+| `GET /perception/accuracy-trend` | 已有 | G8 stats 中的准确率趋势展示 |
+| `GET /perception/summary` | 已有 | G8 daily digest 中的感知简报 |
+
+#### 11.11.3 性能考量
+
+| 特性 | 性能影响 | 优化策略 |
+|------|---------|---------|
+| stats --detail 三路并行 | 最多 3 个并发请求 + 本地 I/O | `Promise.allSettled` 并行执行，单点超时不阻塞 |
+| 后端 stats 聚合 | 每条查询扫描 events 表 | 索引 `(userId, createdAt)` + 并行 `Promise.all` |
+| 大数据量用户 (>100K events) | 可能超 500ms | 服务端分页 or 预聚合表（后续优化） |
+| Perception 缓存 | 30 分钟内不重复请求 | 客户端缓存 + `try/catch` 包裹 |
+| Daily digest perception | 每次 notify 触发一次 GET | 仅在 helpful 模式下请求，30 分钟缓存 |
+
+---
+
+### 11.12 实现清单
+
+#### 11.12.1 代码改动顺序
+
+```bash
+# Phase 3 改动（建议顺序）
+
+# G7: Stats Dashboard 增强
+1. 后端 src/modules/stats/          → 新建模块: controller + service + DTO
+2. 后端 app.module.ts               → 注册 StatsModule
+3. scripts/lib/http.js              → ALLOWED_ENDPOINTS 新增 /^\/stats\/user\/[a-f0-9]{16}$/
+4. scripts/lib/core.js              → 新增 fetchUserStats() helper
+5. scripts/lib/stats.js             → 新增 handleStatsDetail()
+6. scripts/shell.js                 → stats --detail 路由
+
+# G8: Perception 集成
+7. scripts/lib/http.js              → ALLOWED_ENDPOINTS 新增 perception 端点 (2条)
+8. scripts/lib/core.js              → 新增 fetchPerceptionTrend() + fetchPerceptionSummary()
+9. scripts/lib/stats.js             → handleStatsDetail() 新增 perception 获取 + 合并
+10. scripts/lib/notify.js           → handleNotifyDaily() 集成 perception summary
+
+# Rule updates
+11. SKILL.md                         → 新增 §16 Stats Dashboard 渲染规则
+12. SKILL.md                         → 新增 §17 Perception 集成渲染规则
+```
+
+#### 11.12.2 测试验证
+
+| 测试项 | 命令 | 预期结果 |
+|--------|------|----------|
+| Stats detail (全部成功) | `stats --detail` | JSON 包含 local + remote.userStats + remote.perception |
+| Stats detail (后端不可用) | `stats --detail` (模拟 503) | `remoteFallback: true`，仅含 local.tokenReport |
+| Stats detail (perception 不可用) | `stats --detail` (模拟 perception 503) | `perceptionFallback: true`，remote.userStats 正常，remote.perception = null |
+| Stats detail --period 7d | `stats --detail --period 7d` | from-to 间隔 7 天 |
+| Stats detail --compact | `stats --detail --compact` | JSON 正常返回 |
+| Notify daily + perception | `notify daily` (simulate cron fire) | digest JSON 含 `perception` 字段（helpful 模式） |
+| Notify daily - silent skip | `notify daily` (simulate perception 500) | digest JSON 中 `perception: null`，不阻塞 |
+| ALLOWED_ENDPOINTS | 代码检查 | 3 条新正则存在且不破坏已有匹配 |
+| Backend stats endpoint | `curl GET /stats/user/:id` | 200 + JSON 符合 UserStatsResponse schema |
+| Backend auth guard | `curl GET /stats/user/OTHER_ID` (wrong FP) | 403 |
+
+---
+
+### 11.13 后端模块注册示例
+
+```typescript
+// src/modules/stats/stats.module.ts
+
+import { Module } from "@nestjs/common";
+import { TypeOrmModule } from "@nestjs/typeorm";
+import { StatsController } from "./stats.controller";
+import { StatsService } from "./stats.service";
+import { Event } from "../events/event.entity";
+import { UserSkill } from "../user-skills/user-skill.entity";
+import { AuthModule } from "../auth/auth.module";  // 用于 device FP 校验
+
+@Module({
+  imports: [
+    TypeOrmModule.forFeature([Event, UserSkill]),
+    AuthModule,
+  ],
+  controllers: [StatsController],
+  providers: [StatsService],
+  exports: [StatsService],
+})
+export class StatsModule {}
+```
+
+```typescript
+// src/app.module.ts (diff)
+@Module({
+  imports: [
+    // ... existing modules
++   StatsModule,
+  ],
+})
+export class AppModule {}
+```
+
+---
+
+### 11.14 总结
+
+Phase 3 升级聚焦于数据洞察与感知闭环：
+
+| Goal | 关键改动 | 预期收益 |
+|------|----------|----------|
+| **G7: Stats Dashboard** | 新增 `handleStatsDetail()`（三路合并）+ 后端 `GET /stats/user/:userId` | 用户可查看使用全貌（token + 漏斗 + 趋势） |
+| **G8: Perception 集成** | 客户端接入 accuracy-trend + summary 端点；daily digest 集成 | 推荐系统拥有可见的反馈回路，用户信任度提升 |
+
+**技术栈**：
+- NestJS (TypeORM + PostgreSQL) — StatsModule 后端
+- Node.js 22.14+ — 客户端 `handleStatsDetail()`
+- `Promise.allSettled` — 三路并行 + 降级容错
+- ASCII sparkline — perception 趋势可视化
+
+**核心数据流**：
+```
+events 表 (PostgreSQL) → StatsService.aggregate → StatsController → HTTP JSON
+    ──→ (并行) handleStatsDetail() + 本地 session JSONL 解析
+    ──→ 合并 JSON → AI 渲染 → Dashboard HTML
+```
+
+**风险控制**：
+- 三路 `Promise.allSettled`：任一路失败不阻塞其他路
+- 2s 超时 + 多层降级：remoteFallback → perceptionFallback
+- ALLOWED_ENDPOINTS 白名单：新增端点需显式声明
+- Perception 静默跳过：daily digest 中 perception 失败不干扰主体通知
+- 后端性能：索引覆盖 + 并行查询 + p95 ≤ 500ms
+
+---
+
+*Phase 3 架构方案编写完毕，可进入代码实现阶段。*

@@ -398,7 +398,7 @@ Skills:   recommend [limit] | recommend:track <recId> <skillId> <action>
           clean | clean:track <skillId>
           uninstall <skillId> [--confirm]
 Reports:  workflow | daily | weekly | notify | report | share <reportId> <html> [locale]
-Stats:    stats
+Stats:    stats [--detail] | stats user | dashboard
 Radar:    radar | radar:reject <category>
 Bundles:  bundle [id] | bundle install <id> | bundle track-installed <id>
 Security: security <skillId> | security:report <skillId> <reason> <evidence>
@@ -406,7 +406,6 @@ Privacy:  privacy {status|trust <id>|untrust <id>|delete-all --confirm
                  |consent-agree [ver]|consent-decline
                  |disable-redact|enable-redact|log [limit]}
   Events:   event:track <action> [skillId]   (always uses local device fp)
-  Stats:    stats | dashboard
   Profile:  profile {set "<text>"|get|clear}`,
   };
 }
@@ -419,12 +418,29 @@ function handleUnknown(_args, ctx) {
   };
 }
 
-async function handleStats() {
+async function handleStats(args = [], ctx = {}) {
+  const hasDetail = args.includes("--detail") || args.includes("-d") || args.includes("user");
+
+  // Fetch global stats
   let globalStats = {};
   try {
-    const resp = await httpCall("GET", "/stats/public", null, "stats");
+    const resp = await httpCall("GET", "/stats/public");
     if (!resp.error) globalStats = resp;
   } catch {}
+
+  // Fetch personal stats + accuracy trend when --detail is set
+  let personalStats = null;
+  let accuracyTrend = null;
+  if (hasDetail) {
+    try {
+      const [userResp, trendResp] = await Promise.all([
+        httpCall("GET", `/stats/user/${ctx.fp}`).catch(() => null),
+        httpCall("GET", "/perception/accuracy-trend").catch(() => null),
+      ]);
+      if (userResp && !userResp.error) personalStats = userResp;
+      if (trendResp && !trendResp.error) accuracyTrend = trendResp;
+    } catch {}
+  }
 
   // Read local cached events from outbound audit log.
   let events = [];
@@ -460,7 +476,7 @@ async function handleStats() {
     funFact += "，全球 " + totalInstalls.toLocaleString() + " 次安装";
   }
 
-  return {
+  const result = {
     intent: "stats",
     global: {
       total_installs: totalInstalls,
@@ -476,6 +492,23 @@ async function handleStats() {
     },
     fun_fact: funFact,
   };
+
+  // Attach personal stats + accuracy when available
+  if (personalStats) {
+    result.personal = {
+      events: personalStats.events || 0,
+      conversions: personalStats.conversions || 0,
+      active_days: personalStats.activeDays || 0,
+      top_skills: personalStats.topSkills || [],
+      last_active: personalStats.lastActive || null,
+    };
+  }
+
+  if (accuracyTrend) {
+    result.accuracy_trend = accuracyTrend;
+  }
+
+  return result;
 }
 
 function handleDashboard() {
@@ -490,9 +523,14 @@ function handleDashboard() {
   };
 }
 
+// Alias for stats --detail
+async function handleStatsUser(args, ctx) {
+  return handleStats(["--detail"], ctx);
+}
+
 module.exports = {
   handleWorkflow, handleDaily, handleWeekly, handleNotify,
   handleBundle, handleReport, handleShare, handleEvent,
   handleProfile, handleFirstRunDone, handleDiagnose, handleId, handleHelp, handleUnknown,
-  handleStats, handleDashboard,
+  handleStats, handleStatsUser, handleDashboard,
 };

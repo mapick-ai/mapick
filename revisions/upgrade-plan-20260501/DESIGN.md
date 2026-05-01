@@ -2063,3 +2063,782 @@ interface ContextualRecommendation {
 ---
 
 *Phase 2 设计文档编写完毕，可进入代码实现阶段。*
+
+---
+
+# Phase 3 — 数据洞察与感知闭环 CLI 体验设计文档
+
+**版本**: v3.0  
+**日期**: 2026-05-01  
+**范围**: `stats --detail` CLI 输出格式、Dashboard 3 列网格布局、个人统计卡片设计、Perception 准确率趋势渲染  
+**设计原则**: 纯文本 CLI 环境，输出通过 JSON 传递给 AI 渲染；Dashboard 由 AI 将合并 JSON 渲染为视觉仪表盘
+
+---
+
+## 1. Dashboard 增强布局 — 3 列网格
+
+### 1.1 设计目标
+
+将 Phase 2 的单一 `stats token` 视图升级为三列信息架构：**全局概览** | **个人统计** | **感知洞察**。每个区块承载不同维度的数据，AI 水平并排渲染为视觉仪表盘。
+
+三列方案解决的核心问题：
+- Phase 2 `stats token` 仅展示 AI 成本，缺失使用行为和推荐效果两个关键视角
+- 单列纵向滚动导致信息密度低，用户需要多次翻页才能看到完整画像
+- Perception 数据（推荐准确率）与个人 stats 数据需要同时可见才有对比意义
+
+### 1.2 三列网格定义
+
+```
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                          📊 Mapick 使用全景 — 过去 30 天                        │
+├─────────────────────────┬──────────────────────────┬──────────────────────────┤
+│   Column 1: 全局概览     │  Column 2: 个人统计       │  Column 3: 感知洞察       │
+│   (Global Overview)     │  (Personal Stats)        │  (Perception Insights)   │
+├─────────────────────────┼──────────────────────────┼──────────────────────────┤
+│                         │                          │                          │
+│  💰 Token 消耗          │  🎯 推荐漏斗              │  📐 推荐准确率            │
+│  ─────────────────────  │  ─────────────────────    │  ─────────────────────    │
+│  总计: 205K tokens      │  曝光 340                 │  整体: 75%               │
+│  预估: $0.85            │    → 点击 85 (25%)       │  趋势: ↗ +10%            │
+│                         │      → 安装 42 (49%)     │                          │
+│  top 3:                 │  整体转化: 12.4%          │  by category:            │
+│    github-ops   83K     │                          │    security-qa 85% ★     │
+│    _system      36K     │  ⭐ Top Skills            │    dev-tools     78%     │
+│    summarize    19K     │  ─────────────────────    │    productivity  72%     │
+│                         │    github-ops   245次     │    frontend      60%     │
+│  📈 安装趋势            │    code-review  189次     │    data-science  55% ▲   │
+│  ─────────────────────  │    summarize    156次     │                          │
+│  W13 ███  3             │    docker-mgmt   98次    │  💡 洞察                  │
+│  W14 █████ 5 ▲          │    csv-convert   72次    │  ─────────────────────    │
+│  W15 ██ 2    ▼          │                          │  安全类最精准(85%)       │
+│  W16 ████ 4  ▲          │  🏷️ 类别分布             │  数据科学类偏低(55%)    │
+│  累计: 26 skills        │  ─────────────────────    │  建议完善 profile 标签    │
+│                         │  dev-tools      8        │                          │
+│  👤 活跃度              │  security-qa    5        │                          │
+│  ─────────────────────  │  productivity   4        │                          │
+│  活跃天数: 28/30 (93%) │  data-science   3        │                          │
+│  总事件: 1,520          │  frontend       2        │                          │
+│                         │  other          4        │                          │
+│                         │                          │                          │
+└─────────────────────────┴──────────────────────────┴──────────────────────────┘
+```
+
+### 1.3 列内容分配规则
+
+| 列 | 数据源 | 内容 | 渲染要求 |
+|:---|------|------|---------|
+| **列 1：全局概览** | 本地 token 解析（Phase 2 `stats token` 逻辑）+ 后端 `installTrend` | Token 消耗摘要（总计 + top 3）、安装趋势 ASCII 图、活跃度概要 | 简洁摘要，详细信息由 `stats token` 独立命令提供 |
+| **列 2：个人统计** | 后端 `GET /stats/user/:userId` | 推荐漏斗、Top Skills 排名、类别分布 | 数据驱动，漏斗用 ASCII 箭头链，skills 用 bar 排序 |
+| **列 3：感知洞察** | 后端 `GET /perception/accuracy-trend` + `GET /perception/summary` | 准确率趋势 sparkline、按类别准确率拆分、后端 insight 文本 | 趋势可视化 + 人类可读洞察 |
+
+### 1.4 响应式降级（当数据源不可用时）
+
+| 场景 | 渲染策略 |
+|------|---------|
+| 后端 stats 不可用 | 列 1 + 列 3 仍显示，列 2 替换为 "后端数据暂时不可用，稍后自动重试" |
+| Perception 不可用 | 列 1 + 列 2 仍显示，列 3 留空（不显示错误提示） |
+| 本地 token 解析失败 | 列 2 + 列 3 仍显示，列 1 替换为 "本地 token 数据解析失败" |
+| 所有数据源均失败 | 显示单一错误卡片: "暂时无法获取统计数据，请检查网络后重试" |
+
+### 1.5 AI 渲染顺序（从上到下）
+
+```
+1. 总标题行: 📊 Mapick 使用全景 — 过去 {period}
+2. 三列网格内容
+3. 洞察区（如果 insight 数据存在）
+4. 脚注免责声明（token 费用为预估值）
+```
+
+**渲染规则**：
+1. 列之间用 `│` 竖线分隔
+2. 每列宽度均衡，最大列宽 ≤ 30 字符
+3. `--detail` 不渲染原始 JSON（与 Phase 2 一致）
+4. 如果用户指定 `--period 7d`，标题行中 "过去 30 天" → "过去 7 天"
+
+---
+
+## 2. 个人统计卡片设计
+
+### 2.1 设计目标
+
+个人统计卡片是 Dashboard 的核心模块，承载用户最关心的 4 类指标：
+- **推荐转化**：推荐漏斗三个转化率
+- **事件总量**：总事件数 + 按类型拆分
+- **活跃天数**：天数 + 比例
+- **安装趋势**：周安装趋势图 + 累计
+
+### 2.2 推荐漏斗卡片
+
+#### 2.2.1 漏斗 ASCII 渲染
+
+```
+🎯 推荐漏斗（30 天）
+   曝光 340 ──→ 点击 85 (25%) ──→ 安装 42 (49%)
+   整体转化率：12.4%（42/340）
+```
+
+**渲染规则**：
+- 使用 `──→` 箭头连接各阶段
+- 百分号括在括号中：`(25%)`
+- 整体转化率单独一行，加粗显示
+- 如果后端返回 `platformAverageConversionRate`，追加对比：
+  ```
+  📈 高于全平台平均（9.8%）
+  ```
+  或
+  ```
+  📉 低于全平台平均（9.8%）
+  ```
+
+#### 2.2.2 转化率颜色语义
+
+| 转化率范围 | 标签 | 渲染效果 |
+|:---------:|------|---------|
+| > 15% | 优秀 | `📈 高于全平台平均` |
+| 10%-15% | 正常 | `✅ 接近全平台平均` |
+| < 10% | 需关注 | `📉 低于全平台平均` |
+
+### 2.3 事件总量卡片
+
+```
+👤 活跃度
+   活跃天数: 28/30（93%）
+   总事件:   1,520
+     搜索         320 次
+     推荐曝光      340 次
+     推荐点击       85 次
+     推荐安装       42 次
+     安装          68 次
+```
+
+**渲染规则**：
+- 事件按用户可理解的语义分组（搜索、推荐、安装）
+- 不渲染内部事件类型（如 `consent_grant`、`mode_switch`），除非 > 0 且用户主动查询
+- `activeDaysRatio` 用百分号展示，如 93%
+- 活跃比例 < 30% 时标注 `⚠️ 活跃度较低`
+
+### 2.4 Top Skills 排名卡片
+
+```
+⭐ Top Skills（按使用频次）
+   1. github-ops        245 次 ██████████
+   2. code-review       189 次 ████████░░
+   3. summarize         156 次 ██████░░░░
+   4. docker-manage      98 次 ████░░░░░░
+   5. csv-converter      72 次 ███░░░░░░░
+```
+
+**渲染规则**：
+- 最多 5 个（后端 `topSkills` 数组长度）
+- ASCII bar 宽度 10 格，按最大 `interactions` 线性缩放
+- compact 模式（`--detail --compact`）：仅显示 skill name + 次数，省略 bar
+
+### 2.5 安装趋势卡片
+
+```
+📈 安装趋势
+   W13 ███  3
+   W14 █████ 5  ▲
+   W15 ██ 2     ▼
+   W16 ████ 4   ▲
+   → 累计 26 个 skill
+```
+
+**渲染规则**：
+- 每周一行，格式：`{week} {bar} {count} {arrow}`
+- Bar 宽度 10 格，按所有周中最大 `count` 线性缩放
+- 箭头规则：
+  - 本周 > 上周 → `▲`
+  - 本周 < 上周 → `▼`
+  - 本周 == 上周 → `→`
+  - 第一周无上一周对比 → 不显示箭头
+- 累计显示在最末行
+
+### 2.6 类别分布卡片
+
+```
+🏷️ 类别分布
+   dev-tools 8 · security-qa 5 · productivity 4
+   data-science 3 · frontend 2 · other 4
+```
+
+**渲染规则**：
+- 类别名使用 `category` 字段原始值（英文）
+- 按安装数降序排列
+- 紧凑渲染：所有类别在一行或两行内展示完
+- 类别 ≤ 3 个时：单行显示
+- 类别 > 3 个时：两行显示，每个类别用 `·` 分隔
+
+---
+
+## 3. `stats --detail` CLI 输出格式
+
+### 3.1 命令签名
+
+```bash
+# 默认 30 天报告
+node scripts/shell.js stats --detail
+
+# 指定周期
+node scripts/shell.js stats --detail --period 7d
+node scripts/shell.js stats --detail --period 90d
+
+# 紧凑模式（省略 ASCII bar）
+node scripts/shell.js stats --detail --compact
+```
+
+### 3.2 参数说明
+
+| 参数 | 必须 | 默认值 | 说明 |
+|------|:---:|------|------|
+| `--detail` | 是 | — | 触发全景报告模式 |
+| `--period` | 否 | `30d` | 统计周期，`7d` / `30d` / `90d` |
+| `--compact` | 否 | `false` | 紧凑模式，省略 ASCII bar 和装饰 |
+
+### 3.3 数据获取流程
+
+```
+stats --detail
+    │
+    ├── (1) 本地 token 解析 (复用 Phase 2 handleStatsToken)
+    │       └── 读取 ~/.openclaw/agents/main/sessions/*.jsonl
+    │           聚合 → local.tokenReport
+    │
+    ├── (2) GET /stats/user/:userId  (Phase 3 新增)
+    │       └── 请求后端 user stats 端点
+    │           响应 → remote.userStats
+    │
+    └── (3) GET /perception/accuracy-trend (Phase 3 新增)
+            └── 请求后端 perception 准确率趋势
+                响应 → remote.perception
+
+合并 → 统一 JSON → stdout
+```
+
+### 3.4 合并后的 JSON Schema
+
+```json
+{
+  "intent": "stats:detail",
+  "period": "30d",
+  "from": "2026-04-01T00:00:00Z",
+  "to": "2026-05-01T00:00:00Z",
+  "local": {
+    "tokenReport": {
+      "total": {
+        "input": 875000,
+        "output": 476000,
+        "cache": 84000,
+        "all": 1435000,
+        "cost_estimate": 5.92,
+        "currency": "USD",
+        "model_pricing_used": "claude-sonnet-4-20250514"
+      },
+      "by_skill": [
+        {
+          "skill": "github-ops",
+          "input": 52000,
+          "output": 31000,
+          "total": 83000,
+          "cost_estimate": 0.38,
+          "pct_of_total": 44.7,
+          "calls": 12,
+          "status": "active",
+          "last_seen": "2026-05-01T14:20:00Z"
+        }
+      ],
+      "source": {
+        "sessions_scanned": 12,
+        "records_parsed": 203
+      }
+    },
+    "parsedAt": "2026-05-01T12:00:00Z"
+  },
+  "remote": {
+    "userStats": {
+      "userId": "a1b2c3d4e5f6g7h8",
+      "stats": {
+        "eventsTotal": 1520,
+        "eventsByType": {
+          "search": 320,
+          "recommend_view": 340,
+          "recommend_click": 85,
+          "recommend_install": 42,
+          "install": 68,
+          "uninstall": 12,
+          "radar_trigger": 28,
+          "consent_grant": 5,
+          "mode_switch": 3
+        },
+        "recommendShown": 340,
+        "recommendClicked": 85,
+        "recommendInstalled": 42,
+        "conversionRate": {
+          "click_through": 0.25,
+          "install_rate": 0.494,
+          "overall": 0.124
+        },
+        "activeDays": 28,
+        "activeDaysRatio": 0.933,
+        "topSkills": [
+          { "slug": "github-ops", "name": "GitHub Operations", "interactions": 245, "category": "dev-tools" },
+          { "slug": "code-review", "name": "AI Code Review", "interactions": 189, "category": "security-qa" },
+          { "slug": "summarize", "name": "Smart Summarizer", "interactions": 156, "category": "productivity" }
+        ],
+        "installTrend": [
+          { "week": "2026-W13", "count": 3, "cumulative": 15 },
+          { "week": "2026-W14", "count": 5, "cumulative": 20 },
+          { "week": "2026-W15", "count": 2, "cumulative": 22 },
+          { "week": "2026-W16", "count": 4, "cumulative": 26 }
+        ],
+        "categoryDistribution": {
+          "dev-tools": 8,
+          "security-qa": 5,
+          "productivity": 4,
+          "data-science": 3,
+          "frontend": 2,
+          "other": 4
+        }
+      }
+    },
+    "perception": {
+      "trend": [
+        { "date": "2026-04-25", "accuracy": 0.72, "total": 15, "correct": 11 },
+        { "date": "2026-04-26", "accuracy": 0.68, "total": 12, "correct": 8 },
+        { "date": "2026-04-27", "accuracy": 0.75, "total": 18, "correct": 14 },
+        { "date": "2026-04-28", "accuracy": 0.80, "total": 10, "correct": 8 },
+        { "date": "2026-04-29", "accuracy": 0.73, "total": 14, "correct": 10 },
+        { "date": "2026-04-30", "accuracy": 0.78, "total": 16, "correct": 12 },
+        { "date": "2026-05-01", "accuracy": 0.82, "total": 8, "correct": 7 }
+      ],
+      "overall": {
+        "accuracy": 0.75,
+        "totalPredictions": 93,
+        "correctPredictions": 70
+      },
+      "byCategory": [
+        { "category": "security-qa", "accuracy": 0.85, "total": 25, "correct": 21 },
+        { "category": "dev-tools", "accuracy": 0.78, "total": 30, "correct": 23 },
+        { "category": "productivity", "accuracy": 0.72, "total": 18, "correct": 13 },
+        { "category": "data-science", "accuracy": 0.55, "total": 12, "correct": 7 },
+        { "category": "frontend", "accuracy": 0.60, "total": 8, "correct": 5 }
+      ]
+    },
+    "source": "api",
+    "fetchedAt": "2026-05-01T12:00:01Z"
+  },
+  "remoteFallback": false,
+  "generatedAt": "2026-05-01T12:00:01Z"
+}
+```
+
+### 3.5 降级 JSON 输出
+
+当后端 `GET /stats/user/:userId` 不可用时：
+
+```json
+{
+  "intent": "stats:detail",
+  "period": "30d",
+  "from": "2026-04-01T00:00:00Z",
+  "to": "2026-05-01T00:00:00Z",
+  "local": { "tokenReport": { "..." } },
+  "remote": null,
+  "remoteFallback": true,
+  "remoteFallbackReason": "GET /stats/user/:userId returned 503 — backend unavailable",
+  "generatedAt": "2026-05-01T12:00:01Z"
+}
+```
+
+当 `GET /perception/accuracy-trend` 不可用时（`remote.userStats` 仍有效）：
+
+```json
+{
+  "intent": "stats:detail",
+  "period": "30d",
+  "local": { "tokenReport": { "..." } },
+  "remote": {
+    "userStats": { "..." },
+    "perception": null,
+    "source": "api_partial"
+  },
+  "remoteFallback": false,
+  "perceptionFallback": true,
+  "perceptionFallbackReason": "GET /perception/accuracy-trend timed out after 2s",
+  "generatedAt": "2026-05-01T12:00:01Z"
+}
+```
+
+### 3.6 `stats --detail` JSON TypeScript Schema
+
+```typescript
+// 复用 Phase 2 schema
+interface TokenBySkill {
+  skill: string;
+  input: number;
+  output: number;
+  cache: number;
+  total: number;
+  cost_estimate: number;
+  pct_of_total: number;
+  calls: number;
+  status?: "active" | "never_used" | "idle_14d" | "idle_30d" | "zombie";
+  last_seen?: string;
+}
+
+interface StatsDetail {
+  intent: "stats:detail";
+  period: "7d" | "30d" | "90d";
+  from: string;
+  to: string;
+  local: {
+    tokenReport: {
+      total: {
+        input: number;
+        output: number;
+        cache: number;
+        all: number;
+        cost_estimate: number;
+        currency: "USD";
+        model_pricing_used: string;
+      };
+      by_skill: TokenBySkill[];
+      daily_average?: { total_tokens: number; cost_estimate: number; days_tracked: number; };
+      today_vs_average?: { ratio: number; label: string; };
+      source: { sessions_scanned: number; records_parsed: number; last_parsed_ts?: string; };
+    };
+    parsedAt: string;
+  };
+  remote: {
+    userStats: {
+      userId: string;
+      stats: {
+        eventsTotal: number;
+        eventsByType: Record<string, number>;
+        recommendShown: number;
+        recommendClicked: number;
+        recommendInstalled: number;
+        conversionRate: { click_through: number; install_rate: number; overall: number; };
+        activeDays: number;
+        activeDaysRatio: number;
+        topSkills: Array<{ slug: string; name: string; interactions: number; category: string; }>;
+        installTrend: Array<{ week: string; count: number; cumulative: number; }>;
+        categoryDistribution: Record<string, number>;
+      };
+    } | null;
+    perception: {
+      trend: Array<{ date: string; accuracy: number; total: number; correct: number; }>;
+      overall: { accuracy: number; totalPredictions: number; correctPredictions: number; };
+      byCategory: Array<{ category: string; accuracy: number; total: number; correct: number; }>;
+    } | null;
+    source: "api" | "api_partial";
+    fetchedAt: string;
+  } | null;
+  remoteFallback: boolean;
+  remoteFallbackReason?: string;
+  perceptionFallback?: boolean;
+  perceptionFallbackReason?: string;
+  generatedAt: string;
+}
+```
+
+---
+
+## 4. Perception 准确率趋势 AI 渲染模板
+
+### 4.1 设计目标
+
+Perception 准确率在 Dashboard 中以**列 3** 的形式呈现。设计重点：
+- **7 段 sparkline** 可视化最近 7 天的准确率走势
+- **类别拆分** 帮助用户理解推荐在哪些领域精准/不精准
+- **人类可读洞察** 让技术指标转化为 actionable 建议
+
+### 4.2 Sparkline 生成规则
+
+#### 4.2.1 映射表
+
+从 `perception.trend[].accuracy` 值 (0-1) 映射到 sparkline 字符：
+
+| accuracy 范围 | Sparkline 字符 | 语义 |
+|:------------:|:-------------:|------|
+| 0.00 – 0.45 | `▁` | 最低 |
+| 0.45 – 0.50 | `▂` | 很低 |
+| 0.50 – 0.60 | `▃` | 较低 |
+| 0.60 – 0.65 | `▄` | 中等偏低 |
+| 0.65 – 0.72 | `▅` | 中等 |
+| 0.72 – 0.78 | `▆` | 较高 |
+| 0.78 – 0.88 | `▇` | 高 |
+| 0.88 – 1.00 | `█` | 最高 |
+
+#### 4.2.2 趋势方向算法
+
+取最近 7 天 `accuracy` 值，计算线性回归斜率：
+- 斜率 > 0.01 → `improving` → 渲染 `↗ 上升`
+- 斜率 < -0.01 → `declining` → 渲染 `↘ 下降`
+- 否则 → `stable` → 渲染 `→ 平稳`
+
+#### 4.2.3 Delta 计算
+
+`trendDelta` = 最近 1 天 accuracy - 7 天前 accuracy
+
+### 4.3 准确率趋势渲染模板
+
+#### 4.3.1 标准渲染（全部数据可用）
+
+```
+📐 推荐准确率（后验分析）
+
+   整体准确率：75%（70/93 条推荐命中）
+   趋势：▁▂▃▄▅▆▇  ↗ 上升（+10%，近 7 天）
+
+   按类别：
+     security-qa  85% ████████████████░  ★ 最准
+     dev-tools    78% ███████████████░░
+     productivity 72% ██████████████░░░
+     frontend     60% ████████████░░░░░
+     data-science 55% ███████████░░░░░░  ▲ 需关注
+
+   💡 洞察：安全类推荐最精准(85%)，你的安全工具探索意愿很强。
+      数据科学类准确率偏低(55%)，建议完善相关 profile 标签。
+```
+
+#### 4.3.2 Sparkline 渲染规则
+
+1. 取最近 7 天 `trend[].accuracy` 值
+2. 按映射表将每个值转为字符
+3. 拼接为 7 字符序列
+4. 不足 7 天时用 `·` 补齐空位
+
+```
+数据: [0.72, 0.68, 0.75, 0.80, 0.73, 0.78, 0.82]
+     ↓ 映射
+渲染:  ▁▂▃▄▅▆▇
+
+数据: [0.72, 0.68, 0.75, 0.80]  (仅 4 天)
+     ↓ 映射
+渲染:  ▆▅▆▇···
+```
+
+#### 4.3.3 类别准确率排序规则
+
+- 按 `accuracy` 降序排列
+- 最前标 `★ 最准`
+- 最后标 `▲ 需关注`
+- 中间不标
+- 最多展示 5 个类别
+
+#### 4.3.4 ASCII bar 规则
+
+- 10 格宽度
+- 0% = 0 格，100% = 10 格
+- 最高类别显示 `░` 作为剩余空间（未填满部分）
+- 其余类别不显示 `░`
+
+### 4.4 每日 Digest 感知简报渲染
+
+#### 4.4.1 Digest 中 perception 数据的位置
+
+感知简报在 daily digest 末尾展示，作为补充信息：
+
+```
+📋 每日通知 — 2026-05-01
+
+   🔔 版本更新: v0.0.15 → v0.0.17
+   ...
+
+   🧠 Mapick 感知简报
+      推荐准确率：75%（↑ +10%，近 7 天）
+      最精准类别：安全类(85%)、开发工具(78%)
+      建议关注：数据科学类准确率偏低(55%)，可完善 profile 标签
+```
+
+#### 4.4.2 感知简报渲染规则
+
+| 条件 | 渲染行为 |
+|------|---------|
+| perception 请求成功 | 展示感知简报区块 |
+| perception 请求失败（5xx/超时） | **静默跳过**，不展示任何内容 |
+| `overallAccuracy >= 0.7` | 不标颜色 |
+| `overallAccuracy >= 0.5 && < 0.7` | `⚠️ 准确率偏低，建议运行 stats --detail 查看详情` |
+| `overallAccuracy < 0.5` | `⚠️ 准确率低于 50%，建议运行 stats --detail 分析原因` |
+| `trendDirection === "declining"` | 追加 `📉 近 7 天呈下降趋势，建议更新 profile 标签` |
+| `trendDirection === "improving"` | 追加 `趋势向好` |
+
+#### 4.4.3 静默策略
+
+- 感知简报在 `perception` 请求失败时**完全不展示**（包括不展示 "数据不可用" 提示）
+- 理由：daily digest 的主体是通知（版本更新、僵尸 skill），perception 是辅助信息，不能因辅助信息不可用而干扰主体
+- `proactive_mode !== "helpful"` 时不展示感知简报
+
+### 4.5 准确率趋势 JSON 到渲染的映射（AI 参考）
+
+写入 SKILL.md §17 供 AI 在渲染时参考：
+
+```javascript
+// 伪代码：accuracy → sparkline 字符映射
+function accuracyToSpark(v) {
+  if (v < 0.45) return "\u2581"; // ▁
+  if (v < 0.50) return "\u2582"; // ▂
+  if (v < 0.60) return "\u2583"; // ▃
+  if (v < 0.65) return "\u2584"; // ▄
+  if (v < 0.72) return "\u2585"; // ▅
+  if (v < 0.78) return "\u2586"; // ▆
+  if (v < 0.88) return "\u2587"; // ▇
+  return "\u2588";               // █
+}
+
+// 趋势方向计算
+function computeTrendDirection(recent7) {
+  // 取最近 7 天的 accuracy 值做简单线性斜率
+  const n = recent7.length;
+  if (n < 2) return { icon: "→", label: "数据不足" };
+  const first = recent7[0].accuracy;
+  const last = recent7[n - 1].accuracy;
+  const slope = (last - first) / n;
+  if (slope > 0.01) return { icon: "↗", label: "上升" };
+  if (slope < -0.01) return { icon: "↘", label: "下降" };
+  return { icon: "→", label: "平稳" };
+}
+```
+
+---
+
+## 5. Phase 3 设计规范
+
+### 5.1 Emoji 使用规范（Phase 3 新增）
+
+| 场景 | Emoji | 位置 | 用途 |
+|------|-------|------|------|
+| Dashboard 总标题 | 📊 | 标题行 | 使用全景仪表盘 |
+| 全局概览列 | 💰 | 列标题 | Token 消耗摘要 |
+| 个人统计列 | 🎯 | 列标题 | 推荐漏斗 + Top Skills |
+| 感知洞察列 | 📐 | 列标题 | 准确率趋势 |
+| 安装趋势 | 📈 | 区块标题 | 周安装趋势 |
+| 活跃度 | 👤 | 区块标题 | 活跃天数 |
+| 类别分布 | 🏷️ | 区块标题 | 技能类别 |
+| 洞察行 | 💡 | 行首 | AI 生成的洞察 |
+| 感知简报 | 🧠 | 区块标题 | Daily digest 感知简报 |
+| 趋势上升 | ↗ | 内联 | 趋势方向 |
+| 趋势下降 | ↘ | 内联 | 趋势方向 |
+| 趋势平稳 | → | 内联 | 趋势方向 |
+| 转化率高于平均 | 📈 | 内联 | 正面对比 |
+| 转化率低于平均 | 📉 | 内联 | 负面对比 |
+| 活跃度低 | ⚠️ | 行首 | 活跃比例 < 30% |
+
+### 5.2 新增 CLI 子命令一览
+
+| 命令 | 路由函数 | 返回值 intent | 说明 |
+|------|---------|--------------|------|
+| `stats --detail` | `handleStatsDetail("30d")` | `stats:detail` | 全景报告（30 天默认） |
+| `stats --detail --period 7d` | `handleStatsDetail("7d")` | `stats:detail` | 全景报告（7 天） |
+| `stats --detail --period 90d` | `handleStatsDetail("90d")` | `stats:detail` | 全景报告（90 天） |
+| `stats --detail --compact` | `handleStatsDetail("30d", true)` | `stats:detail` | 紧凑模式全景报告 |
+
+### 5.3 Phase 3 与 Phase 2 的兼容
+
+| 维度 | 兼容性 | 说明 |
+|------|--------|------|
+| `stats token today/week` | ✅ | 行为完全不变（不加 `--detail` 时保持 Phase 2 行为） |
+| `stats token` 不加参数 | ✅ | 默认 `today`，行为不变 |
+| 后端 stats 端点不可用 | ✅ | `remoteFallback: true`，仅展示本地 token 数据 |
+| Perception 端点不可用 | ✅ | `perceptionFallback: true`，stats dashboard 跳过感知列，daily digest 静默跳过 |
+| `proactive_mode ≠ helpful` | ✅ | daily digest 不展示感知简报 |
+| 新用户无足够 events | ✅ | 后端返回 `eventsTotal: 0` 时 AI 渲染 "数据收集中，使用 7 天后来看完整报告" |
+| ALLOWED_ENDPOINTS 新增 | ✅ | 新增 3 条正则，不破坏已有匹配 |
+
+### 5.4 Sparkline 字符规范
+
+```
+▁  (U+2581)  — 最低 (0.00-0.45)
+▂  (U+2582)  — 很低 (0.45-0.50)
+▃  (U+2583)  — 较低 (0.50-0.60)
+▄  (U+2584)  — 中等偏低 (0.60-0.65)
+▅  (U+2585)  — 中等 (0.65-0.72)
+▆  (U+2586)  — 较高 (0.72-0.78)
+▇  (U+2587)  — 高 (0.78-0.88)
+█  (U+2588)  — 最高 (0.88-1.00)
+·  (U+00B7)  — 数据缺失占位
+```
+
+---
+
+## 6. 文件变更对照表（Phase 3）
+
+| 文件 | 变更类型 | 变更内容 | 关联模块 |
+|------|:-------:|---------|---------|
+| `scripts/lib/stats.js` | 修改 | 新增 `handleStatsDetail()`：合并本地 token + 后端 stats + perception 数据 | §1, §3 |
+| `scripts/lib/core.js` | 修改 | 新增 `fetchUserStats(userId, period)` + `fetchPerceptionTrend(period)` + `fetchPerceptionSummary()` helper | §3 |
+| `scripts/lib/http.js` | 修改 | `ALLOWED_ENDPOINTS` 新增 3 条：`/stats/user/`、`/perception/accuracy-trend`、`/perception/summary` | §3 |
+| `scripts/shell.js` | 修改 | 调度路由新增 `stats --detail` + `--period` + `--compact` 参数解析 | §3 |
+| `scripts/lib/notify.js` | 修改 | `handleNotifyDaily()` 集成 perception summary 到 digest JSON | §4 |
+| `SKILL.md` | 新增 | §16 Stats Dashboard 渲染规则；§17 Perception 集成渲染规则 | §1, §2, §4 |
+| **后端** | **新增** | `GET /stats/user/:userId` 端点（需与后端团队协调） | §1, §2, §3 |
+| **后端** | 已有 | `/perception/accuracy-trend` 和 `/perception/summary` 已实现 | §4 |
+
+---
+
+## 附录 C：Phase 3 完整 Dashboard 渲染示例
+
+### C.1 标准模式（30 天，所有数据可用）
+
+```
+📊 Mapick 使用全景 — 过去 30 天
+
+💰 Token 消耗                      │ 🎯 推荐漏斗（30 天）              │ 📐 推荐准确率（后验分析）
+─────────────────────              │ ─────────────────────              │ ─────────────────────
+总计: 1.44M tokens · $5.92        │ 曝光 340 ──→ 点击 85 (25%)       │ 整体: 75%（70/93 推荐命中）
+                                   │          ──→ 安装 42 (49%)       │ 趋势: ▁▂▃▄▅▆▇ ↗ +10%
+top 3:                             │ 整体转化率: 12.4%                 │
+  github-ops    364K  · $1.68     │ 📈 高于全平台平均（9.8%）          │ by category:
+  code-review   287K  · $1.32     │                                   │   security-qa  85% ████████████░ ★
+  summarize     144K  · $0.66     │ ⭐ Top Skills                      │   dev-tools    78% ███████████░░
+                                   │ ─────────────────────              │   productivity 72% ██████████░░░
+📈 安装趋势                        │   github-ops      245次 ██████████│   frontend     60% ████████░░░░░
+─────────────────────              │   code-review     189次 ████████░░│   data-science 55% ███████░░░░░░ ▲
+W13 ███  3                        │   summarize       156次 ██████░░░░│
+W14 █████ 5 ▲                     │   docker-manage    98次 ████░░░░░░│ 💡 洞察
+W15 ██ 2    ▼                     │   csv-converter    72次 ███░░░░░░░│ ─────────────────────
+W16 ████ 4  ▲                     │                                   │ 安全类推荐最准(85%)
+→ 累计 26 skills                   │ 🏷️ 类别分布                      │ 数据科学类偏低(55%)
+                                   │ ─────────────────────              │ 建议完善 profile 标签
+👤 活跃度                          │ dev-tools 8 · security-qa 5 ·    │
+─────────────────────              │ productivity 4 · data-science 3 ·  │
+活跃天数: 28/30 (93%)              │ frontend 2 · other 4              │
+总事件: 1,520                      │                                   │
+
+费用为预估值，实际以 Claude 官方计费为准。
+```
+
+### C.2 降级模式（后端 stats 不可用）
+
+```
+📊 Mapick 使用全景 — 过去 30 天
+
+💰 Token 消耗                      │ ⚠️ 后端数据暂时不可用               │ 📐 推荐准确率（后验分析）
+─────────────────────              │                                    │ ─────────────────────
+总计: 1.44M tokens · $5.92        │ /stats/user/:userId 返回 503        │ 整体: 75%（70/93 推荐命中）
+                                   │                                    │ 趋势: ▁▂▃▄▅▆▇ ↗ +10%
+top 3:                             │ 个人统计和推荐漏斗暂时无法展示，      │
+  github-ops    364K  · $1.68     │ 稍后自动重试。                      │ by category:
+  ...                              │                                    │   security-qa  85% ★
+                                   │                                    │   dev-tools    78%
+                                   │                                    │   ...
+
+费用为预估值，实际以 Claude 官方计费为准。
+```
+
+### C.3 紧凑模式（`--detail --compact`）
+
+```
+📊 Mapick 使用全景 — 过去 30 天
+
+💰 1.44M tokens · $5.92 | 🎯 340→85→42 (12.4%) | 📐 75% ↗+10%
+top: github-ops 364K · code-review 287K · summarize 144K
+active: 28/30d · events: 1,520 · installed: 26 skills
+categories: dev-tools 8 · security-qa 5 · productivity 4 · data-science 3
+💡 安全类推荐最准(85%)，数据科学类偏低(55%)。费用为预估值。
+```
+
+---
+
+*Phase 3 设计文档编写完毕，可进入代码实现阶段。*

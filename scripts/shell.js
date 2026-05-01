@@ -81,6 +81,7 @@ const HANDLERS = {
   "event:track": misc.handleEvent,
   stats: misc.handleStats,
   "stats token": token.handleToken,
+  "stats user": misc.handleStatsUser,
   dashboard: misc.handleDashboard,
   token: token.handleToken,
   profile: misc.handleProfile,
