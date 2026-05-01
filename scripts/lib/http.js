@@ -72,6 +72,7 @@ const ALLOWED_ENDPOINTS = [
   /^\/report\/persona$/,
   /^\/share\/upload$/,
   /^\/skill\/[\w-]+\/(security|report)$/,
+  /^\/stats\/public$/,
   /^\/notify\/daily-check$/,
 ];
 
