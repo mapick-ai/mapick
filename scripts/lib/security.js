@@ -7,7 +7,7 @@
 const fs = require("fs");
 const path = require("path");
 const { apiCall, missingArg } = require("./http");
-const { SKILLS_BASES, OUT_ARR, isoNow } = require("./core");
+const { SKILLS_BASES, OUT_ARR, isoNow, validateSkillId } = require("./core");
 const MAX_FILES = 30;
 const MAX_BYTES = 200 * 1024;
 const SCANNABLE_EXT = /\.(js|mjs|cjs|ts|tsx|sh|bash)$/i;
@@ -86,6 +86,9 @@ function scanLocal(skillId) {
 async function handleSecurity(args) {
   if (args.length < 1) return missingArg("Usage: security <skillId>");
   const skillId = args[0];
+  if (!validateSkillId(skillId)) {
+    return { error: "invalid_skill_id", hint: "Skill IDs may contain letters, numbers, underscore, hyphen, and dot (1-64 chars)." };
+  }
   const remote = await apiCall("GET", `/skill/${skillId}/security`, null, "security");
   if (!remote.error) return remote;
 

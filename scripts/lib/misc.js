@@ -256,8 +256,14 @@ async function handleProfile(args, ctx) {
     case "set": {
       const text = args.slice(1).join(" ").trim();
       if (!text) return missingArg('Usage: profile set "<workflow text>"');
-      const tags = extractProfileTags(text);
-      writeConfig("user_profile", text);
+      // P0: redact before persisting to CONFIG.md — prevents secrets leak.
+      const redacted = redactForUpload(text);
+      if (!redacted.ok) {
+        return { error: "profile_redact_failed", message: redacted.message || redacted.error };
+      }
+      const displayText = redacted.text;
+      const tags = extractProfileTags(displayText);
+      writeConfig("user_profile", displayText);
       writeConfig("user_profile_tags", JSON.stringify(tags));
       writeConfig("user_profile_set_at", isoNow());
       // POST /users/:userId/profile-text — userId in path. Local writes
@@ -267,11 +273,11 @@ async function handleProfile(args, ctx) {
         const resp = await httpCall(
           "POST",
           `/users/${ctx.fp}/profile-text`,
-          { profileText: text, profileTags: tags },
+          { profileText: displayText, profileTags: tags },
         );
         uploaded = !resp.error;
       }
-      return { intent: "profile:set", profile: text, tags, uploaded };
+      return { intent: "profile:set", profile: displayText, tags, uploaded };
     }
     case "get": {
       let tags = [];

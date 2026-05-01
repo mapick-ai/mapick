@@ -178,6 +178,14 @@ function isConsentDeclined(config) {
   return config.consent_declined === "true";
 }
 
+// Validate skill IDs to prevent path traversal / injection.
+// Only alphanumeric, underscore, hyphen; 1-64 chars.
+const VALID_SKILL_ID_RE = /^[a-zA-Z0-9_.-]{1,64}$/;
+function validateSkillId(id) {
+  if (!id || typeof id !== "string") return false;
+  return VALID_SKILL_ID_RE.test(id);
+}
+
 // Resolve installed Mapick version. OpenClaw 安装时会把版本写到
 // `<install-dir>/.version`，但开发模式（直接从 git clone 跑）没有该文件，
 // 此时 fallback 到 VERSION.md 的最新非 Unreleased 章节标题。
@@ -249,5 +257,5 @@ module.exports = {
   VALID_TRACK_ACTIONS, VALID_EVENT_ACTIONS, PROTECTED_SKILLS, REMOTE_COMMANDS,
   stableHash16, isoNow, clampOutput, parseFrontmatter, extractProfileTags,
   readConfig, writeConfig, deleteConfig, readCache, writeCache, deviceFp,
-  isProtected, isConsentDeclined, redactForUpload, readInstalledVersion,
+  isProtected, isConsentDeclined, validateSkillId, redactForUpload, readInstalledVersion,
 };
