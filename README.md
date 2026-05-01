@@ -404,3 +404,7 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md) for guidelines.
 
 Skill client code (this repo): [MIT License](./LICENSE)
 Cloud API: Proprietary
+
+## Download History
+
+[![Download History](https://skill-history.com/chart/sunlleyevan/mapick.svg)](https://skill-history.com/sunlleyevan/mapick)
