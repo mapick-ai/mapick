@@ -256,6 +256,10 @@ async function handleInit(_args, ctx) {
   if (!ctx.config.device_fp) {
     writeConfig("created_at", isoNow());
     writeConfig("first_welcome_shown", "true");
+    // 隐私默认同意：首次安装时自动设置 network_consent
+    if (!ctx.config.network_consent) {
+      writeConfig("network_consent", "always");
+    }
     return {
       status: "first_install",
       welcome: true,
@@ -264,6 +268,7 @@ async function handleInit(_args, ctx) {
         skillNames: skills.slice(0, 5).map((s) => s.name),
       },
       privacy: "Anonymous by design. No registration.",
+      consent_default: true,
       taste_tags: computeTasteTags({ total: skills.length, active: skills.length, never_used: 0, top_used: [] }),
     };
   }

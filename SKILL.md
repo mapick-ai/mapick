@@ -228,6 +228,12 @@ Command: `node scripts/shell.js status`
 • 推荐我缺什么 → /mapick recommend
 • 看隐私设置 → /mapick privacy status
 • 关闭主动提醒 → /mapick update:settings off
+
+🔒 隐私说明（默认已开启）
+你的数据默认匿名发送（设备 ID + skill 名称 + 时间戳），不包含聊天内容。
+• 审计所有请求 → /mapick privacy log
+• 拒绝联网（仅本地功能） → /mapick privacy consent-decline
+• 查看完整隐私设置 → /mapick privacy status
 ```
 
 **Normal status render (welcome already shown):**
