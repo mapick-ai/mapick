@@ -125,7 +125,7 @@ async function handle(args, ctx) {
     }
 
     case "untrust": {
-      if (args.length < 2) return missingArg("Usage: privacy untrust <skillId>");
+      if (args.length < 2 || !args[1]) return missingArg("Usage: privacy untrust <skillId>");
       const untrusted = (
         config.trusted_skills ? config.trusted_skills.split(",") : []
       ).filter((s) => s !== args[1]);

@@ -75,6 +75,7 @@ const HANDLERS = {
   radar: radar.handleRadar,
   "radar:reject": radar.handleRadarReject,
   bundle: misc.handleBundle,
+  "bundle:track-installed": misc.handleBundle,
   report: misc.handleReport,
   share: misc.handleShare,
   event: misc.handleEvent,
@@ -114,7 +115,8 @@ async function main() {
   }
 
   // P3 declined gate: network_consent === "declined" blocks remote commands.
-  if (privacy.isRemoteCommand(command, args) && ctx.config.network_consent === "declined") {
+  // update:check is exempt — its handler produces a graceful items: [] fallback.
+  if (privacy.isRemoteCommand(command, args) && ctx.config.network_consent === "declined" && command !== "update:check") {
     console.log(JSON.stringify({
       error: "network_consent_declined",
       mode: "local_only",
@@ -124,7 +126,8 @@ async function main() {
   }
 
   // Opt-out model: global consent_declined blocks remote commands.
-  if (privacy.isRemoteCommand(command, args) && core.isConsentDeclined(ctx.config)) {
+  // update:check is exempt — its handler produces a graceful items: [] fallback.
+  if (privacy.isRemoteCommand(command, args) && core.isConsentDeclined(ctx.config) && command !== "update:check") {
     console.log(JSON.stringify(privacy.remoteAccessError(ctx.config)));
     return;
   }

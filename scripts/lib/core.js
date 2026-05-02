@@ -28,7 +28,12 @@ const PROTECTED_SKILLS = ["mapick", "tasa"];
 // `clean` is intentionally NOT here — handleClean falls back to a local
 // last-modified heuristic when the user has declined data sharing or the
 // backend is unreachable, so it works in all states.
-const REMOTE_COMMANDS = new Set(["recommend", "recommend:track", "search", "workflow", "daily", "weekly", "notify", "report", "security", "security:report", "clean:track", "share"]);
+const REMOTE_COMMANDS = new Set([
+  "recommend", "recommend:track", "search",
+  "workflow", "daily", "weekly", "notify", "report",
+  "security", "security:report", "clean:track", "share",
+  "bundle", "update:check", "update:track", "upgrade:plan",
+]);
 
 // Two skill roots OpenClaw loads from. Workspace is loaded BEFORE managed
 // (so a workspace copy with the same id shadows the managed one).
@@ -175,7 +180,7 @@ function isProtected(skillId) {
 }
 
 function isConsentDeclined(config) {
-  return config.consent_declined === "true";
+  return config.consent_declined === "true" || config.network_consent === "declined";
 }
 
 // Get proactive mode preference from config.
