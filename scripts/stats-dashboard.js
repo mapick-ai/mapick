@@ -9,7 +9,7 @@ const http = require("http");
 const path = require("path");
 
 const PORT = parseInt(process.argv[2] || "3030", 10);
-const API_BASE = "http://127.0.0.1:3010/api/v1";
+const API_BASE = "https://api.mapick.ai/api/v1";
 
 const DASHBOARD_HTML = `<!DOCTYPE html>
 <html lang="zh-CN">
@@ -239,7 +239,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
 </div>
 
 <script>
-const API_BASE = 'http://127.0.0.1:3010/api/v1';
+const API_BASE = 'https://api.mapick.ai/api/v1';
 const fp = localStorage.getItem('mapick_fp') || '0000000000000000';
 
 async function fetchJSON(url) {

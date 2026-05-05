@@ -15,7 +15,7 @@ const REDACTJS_PATH = path.join(SCRIPTS_DIR, "redact.js");
 // TEMP_LOCAL_API_FOR_TESTING 2026-04-30:
 // Before publishing or pushing remote, restore this to
 // "https://api.mapick.ai/api/v1".
-const API_BASE = "http://127.0.0.1:3010/api/v1";
+const API_BASE = "https://api.mapick.ai/api/v1";
 const CACHE_DIR = path.join(os.homedir(), ".mapick", "cache");
 
 const OUT_ARR = parseInt(process.env.MAPICK_OUTPUT_ARRAY_LIMIT || "10", 10);
