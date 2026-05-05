@@ -29,7 +29,7 @@ const PROTECTED_SKILLS = ["mapick", "tasa"];
 // last-modified heuristic when the user has declined data sharing or the
 // backend is unreachable, so it works in all states.
 const REMOTE_COMMANDS = new Set([
-  "recommend", "recommend:track", "search",
+  "recommend", "recommend:track", "search", "intent",
   "workflow", "daily", "weekly", "notify", "report",
   "security", "security:report", "clean:track", "share",
   "bundle", "update:check", "update:track", "upgrade:plan",
