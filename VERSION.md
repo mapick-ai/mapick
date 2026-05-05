@@ -2,6 +2,36 @@
 
 All notable changes to Mapick will be documented in this file.
 
+## v1.0.15 - 2026-05-06
+
+### Added
+
+- `update:check` command detects updates for Mapick self + installed Skills + missing daily-notify cron (heuristic: `last_notify_at` empty or > 7 days old).
+- `notify:plan` / `notify:disable` / `notify:status` / `notify:track` — return cron setup/teardown plans for the AI to execute. Mapick code performs zero subprocess.
+- `upgrade:plan <id>` — returns install plan for `mapick` or any installed Skill. Skill upgrades include a Mapick-side `backup:create` step before the AI runs `openclaw skills install`.
+- `update:settings off|on` — disable / enable detection.
+- `update:dismissed <id> [version]` — silence prompts for 14 days (notify_setup) or 7 days (per skill version).
+- `update:track` — AI reports install/upgrade outcome, Mapick logs to `~/.mapick/logs/install.jsonl`.
+- `backup:create` / `backup:restore` — explicit backup commands (reuse existing `trash/` mechanism).
+- `/skills/check-updates` added to outbound endpoint allowlist (best-effort: backend may not have implemented yet — fails silent).
+- SKILL.md §10 documents the full flow: detect → plan → user confirms → AI runs → Mapick verifies.
+- `/mapick notify` now writes `last_notify_at` so update:check can detect stale cron.
+- CLAWHUB.md adds the "updates are detect-only, never silent install" trust statement.
+- `/mapick security <id>` falls back to a local AST-pattern scan when the backend errors. Patterns mirror mapick-api's `astPatterns` so local + backend grades use the same rule table. Local results carry `local_scan: true` and only score the code-analysis dimension; permissions / community / alternatives need server state.
+- `/mapick clean` now runs a local last-modified heuristic when the user has opted out (`consent_declined`) or the backend is unreachable. Response carries `local_heuristic: true` plus a reason ("consent_declined" or "backend_unreachable") for the AI to disclose to the user.
+- Privacy consent default: new installs default to `network_consent: always` (agreed).
+- Welcome card includes privacy notice footer.
+
+### Changed
+
+- SKILL.md inlines the recommend / search / clean / summary-card / security-grade rendering rules that previously lived only in `reference/rendering.md`. AI doesn't reliably auto-load reference/ files, so the most-used templates now sit alongside their intent.
+- `clean` removed from `REMOTE_COMMANDS` (lib/core.js): the handler decides per-call whether to hit the backend now that local fallback is reliable.
+- Removed global stats display from client (personal stats retained).
+
+### Fixed
+
+- D7-3: Added `intent` to `REMOTE_COMMANDS` for consent gate — consent decline now correctly blocks all remote commands.
+
 ## v0.0.24 - 2026-04-30
 
 ### Changed
@@ -55,36 +85,6 @@ All notable changes to Mapick will be documented in this file.
 ### Changed
 
 - status command fix (#53), notify:plan delivery warning (#54/#55), p0/p1/p2 skill upgrade merges (http.js native requests, query param redaction, redact RULE_COUNT export, misc/privacy/recommend/clean optimizations), TLS intermediate cert reverted
-
-## v1.0.15 - 2026-05-06
-
-### Added
-
-- `update:check` command detects updates for Mapick self + installed Skills + missing daily-notify cron (heuristic: `last_notify_at` empty or > 7 days old).
-- `notify:plan` / `notify:disable` / `notify:status` / `notify:track` — return cron setup/teardown plans for the AI to execute. Mapick code performs zero subprocess.
-- `upgrade:plan <id>` — returns install plan for `mapick` or any installed Skill. Skill upgrades include a Mapick-side `backup:create` step before the AI runs `openclaw skills install`.
-- `update:settings off|on` — disable / enable detection.
-- `update:dismissed <id> [version]` — silence prompts for 14 days (notify_setup) or 7 days (per skill version).
-- `update:track` — AI reports install/upgrade outcome, Mapick logs to `~/.mapick/logs/install.jsonl`.
-- `backup:create` / `backup:restore` — explicit backup commands (reuse existing `trash/` mechanism).
-- `/skills/check-updates` added to outbound endpoint allowlist (best-effort: backend may not have implemented yet — fails silent).
-- SKILL.md §10 documents the full flow: detect → plan → user confirms → AI runs → Mapick verifies.
-- `/mapick notify` now writes `last_notify_at` so update:check can detect stale cron.
-- CLAWHUB.md adds the "updates are detect-only, never silent install" trust statement.
-- `/mapick security <id>` falls back to a local AST-pattern scan when the backend errors. Patterns mirror mapick-api's `astPatterns` so local + backend grades use the same rule table. Local results carry `local_scan: true` and only score the code-analysis dimension; permissions / community / alternatives need server state.
-- `/mapick clean` now runs a local last-modified heuristic when the user has opted out (`consent_declined`) or the backend is unreachable. Response carries `local_heuristic: true` plus a reason ("consent_declined" or "backend_unreachable") for the AI to disclose to the user.
-- Privacy consent default: new installs default to `network_consent: always` (agreed).
-- Welcome card includes privacy notice footer.
-
-### Changed
-
-- SKILL.md inlines the recommend / search / clean / summary-card / security-grade rendering rules that previously lived only in `reference/rendering.md`. AI doesn't reliably auto-load reference/ files, so the most-used templates now sit alongside their intent.
-- `clean` removed from `REMOTE_COMMANDS` (lib/core.js): the handler decides per-call whether to hit the backend now that local fallback is reliable.
-- Removed global stats display from client (personal stats retained).
-
-### Fixed
-
-- D7-3: Added `intent` to `REMOTE_COMMANDS` for consent gate — consent decline now correctly blocks all remote commands.
 
 ## v0.0.15 - 2026-04-29
 
