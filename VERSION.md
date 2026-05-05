@@ -2,6 +2,12 @@
 
 All notable changes to Mapick will be documented in this file.
 
+## v1.0.16 - 2026-05-06
+
+### Fixed
+
+- Restore production API_BASE (https://api.mapick.ai/api/v1) in core.js and stats-dashboard.js for ClawHub publish
+
 ## v1.0.15 - 2026-05-06
 
 ### Added
