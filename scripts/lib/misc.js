@@ -421,13 +421,6 @@ function handleUnknown(_args, ctx) {
 async function handleStats(args = [], ctx = {}) {
   const hasDetail = args.includes("--detail") || args.includes("-d") || args.includes("user");
 
-  // Fetch global stats
-  let globalStats = {};
-  try {
-    const resp = await httpCall("GET", "/stats/public");
-    if (!resp.error) globalStats = resp;
-  } catch {}
-
   // Fetch personal stats + accuracy trend when --detail is set
   let personalStats = null;
   let accuracyTrend = null;
@@ -463,26 +456,8 @@ async function handleStats(args = [], ctx = {}) {
   const conversionRate =
     shown > 0 ? `${Math.round((installed / shown) * 100)}%` : "—";
 
-  // Fun fact from global stats.
-  const skillsCovered = globalStats.skillsCovered || 0;
-  const dailyInteractions = globalStats.dailyInteractions || 0;
-  const totalInstalls = globalStats.installs || 0;
-  let funFact = "Mapick 已覆盖 " + skillsCovered.toLocaleString() + " 个 skill";
-  if (dailyInteractions > 0) {
-    funFact +=
-      "，每日活跃交互 " + dailyInteractions.toLocaleString() + " 次";
-  }
-  if (totalInstalls > 0) {
-    funFact += "，全球 " + totalInstalls.toLocaleString() + " 次安装";
-  }
-
   const result = {
     intent: "stats",
-    global: {
-      total_installs: totalInstalls,
-      daily_interactions: dailyInteractions,
-      skills_covered: skillsCovered,
-    },
     local: {
       events_logged: events.length,
       rec_shown: shown,
@@ -490,7 +465,6 @@ async function handleStats(args = [], ctx = {}) {
       rec_installed: installed,
       conversion_rate: conversionRate,
     },
-    fun_fact: funFact,
   };
 
   // Attach personal stats + accuracy when available
