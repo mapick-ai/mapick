@@ -6,8 +6,8 @@ const path = require("path");
 const {
   CONFIG_DIR, OUT_ARR, VALID_EVENT_ACTIONS,
   isoNow, extractProfileTags, redactForUpload,
-  writeConfig, deleteConfig,
-  isConsentDeclined, readInstalledVersion,
+  readConfig, writeConfig, deleteConfig,
+  isConsentDeclined, getProactiveMode, readInstalledVersion, resolveCanonicalSlug,
 } = require("./core");
 const { httpCall, apiCall, missingArg } = require("./http");
 
@@ -21,12 +21,13 @@ async function handleWorkflow(_args, ctx) {
 }
 
 async function handleDaily(_args, ctx) {
-  return apiCall(
+  const result = await apiCall(
     "GET",
     `/assistant/daily-digest/${ctx.fp}?compact=1`,
     null,
     "daily",
   );
+  return attachDay1Summary(result, ctx);
 }
 
 async function handleWeekly(_args, ctx) {
@@ -52,8 +53,11 @@ async function handleNotify() {
   params.set("compact", "1");
   params.set("limit", String(OUT_ARR));
   const resp = await httpCall("GET", `/notify/daily-check?${params}`);
+  const recommendations = await fetchRecommendations(2);
   // Silence-first: backend/network failure → empty alerts.
-  if (resp.error) return { intent: "notify", alerts: [], dev_build: isDevBuild };
+  if (resp.error) {
+    return { intent: "notify", alerts: [], dev_build: isDevBuild, recommendations };
+  }
   if (Array.isArray(resp.alerts) && installedVer) {
     const baseVersion = installedVer.split("-")[0];
     resp.alerts = resp.alerts.filter((alert) => {
@@ -66,7 +70,17 @@ async function handleNotify() {
   // Track liveness — used by `update:check` to detect stale notify and prompt
   // the user to (re)set up the cron.
   writeConfig("last_notify_at", isoNow());
-  return { intent: "notify", dev_build: isDevBuild, ...resp };
+  return { intent: "notify", dev_build: isDevBuild, recommendations, ...resp };
+}
+
+async function fetchRecommendations(limit = 2) {
+  try {
+    const resp = await httpCall("GET", `/recommendations/feed?limit=${limit}`);
+    if (resp.error) return [];
+    return (resp.items || resp.recommendations || []).slice(0, limit);
+  } catch {
+    return [];
+  }
 }
 
 async function handleBundle(args, ctx) {
@@ -88,6 +102,26 @@ async function handleBundle(args, ctx) {
       "bundle:install",
     );
     r.bundleId = args[1];
+    // Normalize install command slugs: backend may return skillssh: URLs or org/repo/name
+    if (r.installCommands && Array.isArray(r.installCommands)) {
+      r.installCommands = r.installCommands.map((cmd) => {
+        // Command is typically "openclaw skills install <slug>"
+        // Extract the slug part and normalize it
+        const parts = (cmd.command || cmd || "").split(" ");
+        const slugIdx = parts.findIndex((p) => p === "install") + 1;
+        if (slugIdx > 0 && slugIdx < parts.length) {
+          const rawSlug = parts[slugIdx];
+          const cleanSlug = resolveCanonicalSlug(rawSlug);
+          parts[slugIdx] = cleanSlug;
+          return {
+            ...cmd,
+            command: parts.join(" "),
+            normalized_slug: cleanSlug,
+          };
+        }
+        return cmd;
+      });
+    }
     return r;
   }
   if (sub === "track-installed" && args[1]) {
@@ -104,9 +138,54 @@ async function handleBundle(args, ctx) {
   return apiCall("GET", `/bundle?limit=${OUT_ARR}`, null, "bundle");
 }
 
-async function handleReport() {
+async function attachDay1Summary(result, ctx) {
+  try {
+    const { scanSkills, aggregateSummary } = require("./skills");
+    const config = ctx.config || readConfig();
+    const summaryConfig = {
+      ...config,
+      device_fp: config.device_fp || ctx.fp,
+    };
+    const localSummary = await aggregateSummary(scanSkills(), summaryConfig);
+    // aggregateSummary already calls computeTasteTags internally and stores
+    // the result in localSummary.taste_tags — use it directly to avoid
+    // double-computation and type drift (null vs []).
+    const tt = localSummary.taste_tags;
+    result.day1_summary = localSummary;
+    result.taste_tags = tt ? tt.tags : null;
+    result.taste_fact = tt ? tt.fact : null;
+    result.next_action_hint =
+      "Persona data is still brewing, but day-1 summary and taste tags are ready to render.";
+  } catch (err) {
+    result.day1_summary_error = err.message;
+  }
+  return result;
+}
+
+async function handleReport(_args = [], ctx = {}) {
   const reportResp = await httpCall("GET", `/report/persona?compact=1`);
+  if (reportResp.error === "rate_limit") {
+    return attachDay1Summary(
+      {
+        intent: "report",
+        status: "brewing",
+        fallback: "local_day1_summary",
+        messageEn:
+          "Persona data is still brewing, but Mapick can show a local day-1 summary right now.",
+      },
+      ctx,
+    );
+  }
+
   const result = { intent: "report", ...reportResp };
+  if (result.error) {
+    result.status = "brewing";
+    result.fallback = "local_day1_summary";
+    result.messageEn =
+      result.messageEn ||
+      "Persona backend is temporarily unavailable, but Mapick can still show a local day-1 summary.";
+    return attachDay1Summary(result, ctx);
+  }
   if (
     result.status === "brewing" ||
     result.primaryPersona?.id === "fresh_meat"
@@ -115,6 +194,7 @@ async function handleReport() {
     result.messageEn =
       result.messageEn ||
       ":lock: Your persona is brewing. Use Mapick for a few more skill actions before generating a shareable report.";
+    await attachDay1Summary(result, ctx);
   }
   return result;
 }
@@ -195,9 +275,24 @@ async function handleProfile(args, ctx) {
   switch (sub) {
     case "set": {
       const text = args.slice(1).join(" ").trim();
-      if (!text) return missingArg('Usage: profile set "<workflow text>"');
-      const tags = extractProfileTags(text);
-      writeConfig("user_profile", text);
+      if (!text) return missingArg('Usage: profile set "<workflow text>" or profile set proactive_mode=<helpful|silent|off>');
+
+      // Check for proactive_mode setting
+      const proactiveMatch = text.match(/^proactive_mode\s*=\s*(helpful|silent|off)$/i);
+      if (proactiveMatch) {
+        const mode = proactiveMatch[1].toLowerCase();
+        writeConfig("proactive_mode", mode);
+        return { intent: "profile:set", proactive_mode: mode, updated: true };
+      }
+
+      // P0: redact before persisting to CONFIG.md — prevents secrets leak.
+      const redacted = redactForUpload(text);
+      if (!redacted.ok) {
+        return { error: "profile_redact_failed", message: redacted.message || redacted.error };
+      }
+      const displayText = redacted.text;
+      const tags = extractProfileTags(displayText);
+      writeConfig("user_profile", displayText);
       writeConfig("user_profile_tags", JSON.stringify(tags));
       writeConfig("user_profile_set_at", isoNow());
       // POST /users/:userId/profile-text — userId in path. Local writes
@@ -207,11 +302,11 @@ async function handleProfile(args, ctx) {
         const resp = await httpCall(
           "POST",
           `/users/${ctx.fp}/profile-text`,
-          { profileText: text, profileTags: tags },
+          { profileText: displayText, profileTags: tags },
         );
         uploaded = !resp.error;
       }
-      return { intent: "profile:set", profile: text, tags, uploaded };
+      return { intent: "profile:set", profile: displayText, tags, uploaded };
     }
     case "get": {
       let tags = [];
@@ -223,6 +318,7 @@ async function handleProfile(args, ctx) {
         profile: ctx.config.user_profile || null,
         tags,
         set_at: ctx.config.user_profile_set_at || null,
+        proactive_mode: ctx.config.proactive_mode || "helpful",
       };
     }
     case "clear": {
@@ -298,16 +394,19 @@ function handleHelp() {
 Local:    init | status | scan | summary | id | first-run-done
 Diag:     diagnose | version
 Skills:   recommend [limit] | recommend:track <recId> <skillId> <action>
-          search <query> [limit] | clean | clean:track <skillId>
+          search <query> [limit] | intent <natural language>
+          clean | clean:track <skillId>
           uninstall <skillId> [--confirm]
 Reports:  workflow | daily | weekly | notify | report | share <reportId> <html> [locale]
+Stats:    stats [--detail] | stats user | dashboard
+Radar:    radar | radar:reject <category>
 Bundles:  bundle [id] | bundle install <id> | bundle track-installed <id>
 Security: security <skillId> | security:report <skillId> <reason> <evidence>
 Privacy:  privacy {status|trust <id>|untrust <id>|delete-all --confirm
                  |consent-agree [ver]|consent-decline
                  |disable-redact|enable-redact|log [limit]}
-Events:   event:track <action> [skillId]   (always uses local device fp)
-Profile:  profile {set "<text>"|get|clear}`,
+  Events:   event:track <action> [skillId]   (always uses local device fp)
+  Profile:  profile {set "<text>"|get|clear}`,
   };
 }
 
@@ -319,8 +418,93 @@ function handleUnknown(_args, ctx) {
   };
 }
 
+async function handleStats(args = [], ctx = {}) {
+  const hasDetail = args.includes("--detail") || args.includes("-d") || args.includes("user");
+
+  // Fetch personal stats + accuracy trend when --detail is set
+  let personalStats = null;
+  let accuracyTrend = null;
+  if (hasDetail) {
+    try {
+      const [userResp, trendResp] = await Promise.all([
+        httpCall("GET", `/stats/user/${ctx.fp}`).catch(() => null),
+        httpCall("GET", "/perception/accuracy-trend").catch(() => null),
+      ]);
+      if (userResp && !userResp.error) personalStats = userResp;
+      if (trendResp && !trendResp.error) accuracyTrend = trendResp;
+    } catch {}
+  }
+
+  // Read local cached events from outbound audit log.
+  let events = [];
+  try {
+    const { readOutboundLog } = require("./audit");
+    events = readOutboundLog();
+  } catch {}
+
+  // Count recommendation conversion events.
+  const recEvents = events.filter((e) => e.intent === "recommend:track" || e.action?.startsWith("rec_"));
+  const shown = recEvents.filter((e) =>
+    (e.action || e.method || "").includes("shown"),
+  ).length;
+  const clicks = recEvents.filter((e) =>
+    (e.action || e.method || "").includes("click"),
+  ).length;
+  const installed = recEvents.filter((e) =>
+    (e.action || e.method || "").includes("installed"),
+  ).length;
+  const conversionRate =
+    shown > 0 ? `${Math.round((installed / shown) * 100)}%` : "—";
+
+  const result = {
+    intent: "stats",
+    local: {
+      events_logged: events.length,
+      rec_shown: shown,
+      rec_clicked: clicks,
+      rec_installed: installed,
+      conversion_rate: conversionRate,
+    },
+  };
+
+  // Attach personal stats + accuracy when available
+  if (personalStats) {
+    result.personal = {
+      events: personalStats.events || 0,
+      conversions: personalStats.conversions || 0,
+      active_days: personalStats.activeDays || 0,
+      top_skills: personalStats.topSkills || [],
+      last_active: personalStats.lastActive || null,
+    };
+  }
+
+  if (accuracyTrend) {
+    result.accuracy_trend = accuracyTrend;
+  }
+
+  return result;
+}
+
+function handleDashboard() {
+  const DASHBOARD_PORT = 3030;
+  const url = `http://127.0.0.1:${DASHBOARD_PORT}/`;
+  return {
+    intent: "dashboard",
+    url,
+    port: DASHBOARD_PORT,
+    hint: `Stats dashboard running at ${url} — open in a browser.`,
+    _open_command: `open ${url}`,
+  };
+}
+
+// Alias for stats --detail
+async function handleStatsUser(args, ctx) {
+  return handleStats(["--detail"], ctx);
+}
+
 module.exports = {
   handleWorkflow, handleDaily, handleWeekly, handleNotify,
   handleBundle, handleReport, handleShare, handleEvent,
   handleProfile, handleFirstRunDone, handleDiagnose, handleId, handleHelp, handleUnknown,
+  handleStats, handleStatsUser, handleDashboard,
 };

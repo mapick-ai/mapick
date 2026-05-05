@@ -29,9 +29,11 @@ const skills = require("./lib/skills");
 const recommend = require("./lib/recommend");
 const clean = require("./lib/clean");
 const security = require("./lib/security");
+const radar = require("./lib/radar");
 const misc = require("./lib/misc");
 const updates = require("./lib/updates");
 const doctor = require("./lib/doctor");
+const token = require("./lib/token");
 
 const HANDLERS = {
   init: skills.handleInit,
@@ -42,6 +44,7 @@ const HANDLERS = {
   recommend: recommend.handleRecommend,
   "recommend:track": recommend.handleTrack,
   search: recommend.handleSearch,
+  intent: recommend.handleIntent,
 
   clean: clean.handleClean,
   "clean:track": clean.handleTrack,
@@ -53,6 +56,7 @@ const HANDLERS = {
   "security:report": security.handleReport,
 
   privacy: privacy.handle,
+  "network-consent": privacy.handleNetworkConsent,
 
   "update:check": updates.handleCheck,
   "update:settings": updates.handleSettings,
@@ -68,11 +72,19 @@ const HANDLERS = {
   daily: misc.handleDaily,
   weekly: misc.handleWeekly,
   notify: misc.handleNotify,
+  radar: radar.handleRadar,
+  "radar:reject": radar.handleRadarReject,
   bundle: misc.handleBundle,
+  "bundle:track-installed": misc.handleBundle,
   report: misc.handleReport,
   share: misc.handleShare,
   event: misc.handleEvent,
   "event:track": misc.handleEvent,
+  stats: misc.handleStats,
+  "stats token": token.handleToken,
+  "stats user": misc.handleStatsUser,
+  dashboard: misc.handleDashboard,
+  token: token.handleToken,
   profile: misc.handleProfile,
   "first-run-done": misc.handleFirstRunDone,
   diagnose: misc.handleDiagnose,
@@ -94,10 +106,28 @@ async function main() {
     fp: core.deviceFp(),
   };
 
-  // Opt-out model: data flows by default. Only block remote commands when
-  // the user has explicitly run `privacy consent-decline`. New installs
-  // skip the consent gate entirely.
-  if (privacy.isRemoteCommand(command, args) && core.isConsentDeclined(ctx.config)) {
+  // P3: Function-level consent gate. On first network operation, prompt the
+  // user before sending any data. Once consent is set (always/once/declined),
+  // this gate is skipped.
+  if (privacy.isRemoteCommand(command, args) && privacy.isFirstNetworkUse(ctx.config)) {
+    console.log(JSON.stringify(privacy.networkConsentPrompt(ctx)));
+    return;
+  }
+
+  // P3 declined gate: network_consent === "declined" blocks remote commands.
+  // update:check is exempt — its handler produces a graceful items: [] fallback.
+  if (privacy.isRemoteCommand(command, args) && ctx.config.network_consent === "declined" && command !== "update:check") {
+    console.log(JSON.stringify({
+      error: "network_consent_declined",
+      mode: "local_only",
+      hint: "You chose local mode. Run `node scripts/shell.js network-consent always` to allow network access, or use local-only features.",
+    }));
+    return;
+  }
+
+  // Opt-out model: global consent_declined blocks remote commands.
+  // update:check is exempt — its handler produces a graceful items: [] fallback.
+  if (privacy.isRemoteCommand(command, args) && core.isConsentDeclined(ctx.config) && command !== "update:check") {
     console.log(JSON.stringify(privacy.remoteAccessError(ctx.config)));
     return;
   }
@@ -105,6 +135,15 @@ async function main() {
   const handler = HANDLERS[command] || misc.handleUnknown;
   const result = await handler(args, ctx);
   console.log(JSON.stringify(core.clampOutput(result)));
+
+  // P3: "once" consent expires after one successful remote command.
+  if (
+    privacy.isRemoteCommand(command, args) &&
+    ctx.config.network_consent === "once"
+  ) {
+    core.deleteConfig("network_consent");
+    core.deleteConfig("network_consent_at");
+  }
 }
 
 main().catch((e) => console.log(JSON.stringify({ error: e.message })));

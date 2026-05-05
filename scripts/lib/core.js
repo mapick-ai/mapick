@@ -12,7 +12,10 @@ const SCRIPTS_DIR = path.dirname(__dirname);
 const CONFIG_FILE = path.join(CONFIG_DIR, "CONFIG.md");
 const TRASH_DIR = path.join(CONFIG_DIR, "trash");
 const REDACTJS_PATH = path.join(SCRIPTS_DIR, "redact.js");
-const API_BASE = "https://api.mapick.ai/api/v1";
+// TEMP_LOCAL_API_FOR_TESTING 2026-04-30:
+// Before publishing or pushing remote, restore this to
+// "https://api.mapick.ai/api/v1".
+const API_BASE = "http://127.0.0.1:3010/api/v1";
 const CACHE_DIR = path.join(os.homedir(), ".mapick", "cache");
 
 const OUT_ARR = parseInt(process.env.MAPICK_OUTPUT_ARRAY_LIMIT || "10", 10);
@@ -25,7 +28,12 @@ const PROTECTED_SKILLS = ["mapick", "tasa"];
 // `clean` is intentionally NOT here — handleClean falls back to a local
 // last-modified heuristic when the user has declined data sharing or the
 // backend is unreachable, so it works in all states.
-const REMOTE_COMMANDS = new Set(["recommend", "recommend:track", "search", "workflow", "daily", "weekly", "notify", "report", "security", "security:report", "clean:track", "share"]);
+const REMOTE_COMMANDS = new Set([
+  "recommend", "recommend:track", "search", "intent",
+  "workflow", "daily", "weekly", "notify", "report",
+  "security", "security:report", "clean:track", "share",
+  "bundle", "update:check", "update:track", "upgrade:plan",
+]);
 
 // Two skill roots OpenClaw loads from. Workspace is loaded BEFORE managed
 // (so a workspace copy with the same id shadows the managed one).
@@ -172,7 +180,23 @@ function isProtected(skillId) {
 }
 
 function isConsentDeclined(config) {
-  return config.consent_declined === "true";
+  return config.consent_declined === "true" || config.network_consent === "declined";
+}
+
+// Get proactive mode preference from config.
+// Valid values: "helpful" (default), "silent", "off"
+function getProactiveMode(config) {
+  const mode = config.proactive_mode;
+  if (mode === "silent" || mode === "off") return mode;
+  return "helpful"; // default
+}
+
+// Validate skill IDs to prevent path traversal / injection.
+// Only alphanumeric, underscore, hyphen; 1-64 chars.
+const VALID_SKILL_ID_RE = /^[a-zA-Z0-9_.-]{1,64}$/;
+function validateSkillId(id) {
+  if (!id || typeof id !== "string") return false;
+  return VALID_SKILL_ID_RE.test(id);
 }
 
 // Resolve installed Mapick version. OpenClaw 安装时会把版本写到
@@ -188,6 +212,29 @@ function readInstalledVersion() {
     const v = fs.readFileSync(versionFile, "utf8").trim();
     if (v) return v;
   } catch {}
+
+  // Local development checkout: no installer-owned .version, but .git exists.
+  // Treat it as a dev build so notify/update checks don't nag that the latest
+  // published release is newer than the code currently being validated.
+  try {
+    const gitPath = path.join(CONFIG_DIR, ".git");
+    let gitDir = gitPath;
+    const gitStat = fs.statSync(gitPath);
+    if (gitStat.isFile()) {
+      const raw = fs.readFileSync(gitPath, "utf8").trim();
+      const m = raw.match(/^gitdir:\s*(.+)$/);
+      if (m) gitDir = path.resolve(CONFIG_DIR, m[1]);
+    }
+    const head = fs.readFileSync(path.join(gitDir, "HEAD"), "utf8").trim();
+    if (/^[0-9a-f]{40}$/i.test(head)) return `local-${head.slice(0, 7)}`;
+    const refMatch = head.match(/^ref:\s*(.+)$/);
+    if (refMatch) {
+      const refFile = path.join(gitDir, refMatch[1]);
+      const sha = fs.readFileSync(refFile, "utf8").trim();
+      if (/^[0-9a-f]{40}$/i.test(sha)) return `local-${sha.slice(0, 7)}`;
+    }
+  } catch {}
+
   // Fallback：解析 VERSION.md 第一个 `## vX.Y.Z` 标题（跳过 `## Unreleased`）。
   // VERSION.md 与 CONFIG_DIR 同级，是项目里唯一权威的版本时间线。
   const versionMd = path.join(CONFIG_DIR, "VERSION.md");
@@ -199,6 +246,41 @@ function readInstalledVersion() {
     }
   } catch {}
   return null;
+}
+
+// Resolve a skill slug from various input formats.
+// Handles: bare names, skillssh: URLs, clawhub: URLs, org/repo/name paths.
+// Returns a clean slug suitable for `openclaw skills install`.
+function resolveCanonicalSlug(raw) {
+  if (!raw || typeof raw !== "string") return raw;
+  const s = raw.trim();
+  if (!s) return s;
+
+  // 1. Pure short name (alphanumeric, underscore, hyphen) → return directly
+  if (/^[a-zA-Z0-9_-]+$/.test(s)) return s;
+
+  // 2. skillssh: prefix → extract last segment
+  if (s.startsWith("skillssh:")) {
+    const parts = s.split("/");
+    return parts[parts.length - 1] || s;
+  }
+
+  // 3. clawhub: prefix → extract slug after the prefix
+  if (s.startsWith("clawhub:")) {
+    const rest = s.slice(8); // "clawhub:" length
+    // clawhub:org/slug or clawhub:slug
+    const parts = rest.split("/");
+    return parts[parts.length - 1] || rest;
+  }
+
+  // 4. org/repo/name or org/name format → extract name
+  const slashParts = s.split("/");
+  if (slashParts.length >= 2) {
+    return slashParts[slashParts.length - 1];
+  }
+
+  // 5. Fallback → return original
+  return s;
 }
 
 function redactForUpload(text) {
@@ -223,5 +305,6 @@ module.exports = {
   VALID_TRACK_ACTIONS, VALID_EVENT_ACTIONS, PROTECTED_SKILLS, REMOTE_COMMANDS,
   stableHash16, isoNow, clampOutput, parseFrontmatter, extractProfileTags,
   readConfig, writeConfig, deleteConfig, readCache, writeCache, deviceFp,
-  isProtected, isConsentDeclined, redactForUpload, readInstalledVersion,
+  isProtected, isConsentDeclined, getProactiveMode, validateSkillId, resolveCanonicalSlug,
+  redactForUpload, readInstalledVersion,
 };

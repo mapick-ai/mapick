@@ -31,18 +31,8 @@ const PWCONFIG_REGEX = new RegExp(
 const RULES = [
   // Provider-specific access strings (must be BEFORE generic sk-*)
   [/\bsk-ant-[a-zA-Z0-9_-]{20,}/g, '[REDACTED_ANTHROPIC]'],
-  [/\bsk_(test|live)_[a-zA-Z0-9]{24,}/g, '[REDACTED_STRIPE]'],
-  [/\bglm-[a-zA-Z0-9_-]{20,}/g, '[REDACTED_GLM]'],
-  [/\bghp_[a-zA-Z0-9]{36,}/g, '[REDACTED_GITHUB]'],
-  [/\bgho_[a-zA-Z0-9]{36,}/g, '[REDACTED_GITHUB]'],
-  [/\bghu_[a-zA-Z0-9]{36,}/g, '[REDACTED_GITHUB]'],
-  [/\bghs_[a-zA-Z0-9]{36,}/g, '[REDACTED_GITHUB]'],
-  [/\bAKIA[0-9A-Z]{16}/g, '[REDACTED_AWS]'],
-  [/\bxox[bposr]-[a-zA-Z0-9-]{10,}/g, '[REDACTED_SLACK]'],
-  [/\borg-[a-zA-Z0-9]{20,}/g, '[REDACTED_OPENAI_ORG]'],
-  
-  // Generic access strings (AFTER specific ones)
-  [/\bsk-[a-zA-Z0-9]{20,}/g, '[REDACTED_OPENAI]'],
+  // OpenAI / Generic API keys (with optional hyphens for project keys)
+  [/\bsk-[a-zA-Z0-9][a-zA-Z0-9_-]{19,}/g, '[REDACTED_API_KEY]'],
   
   [/\beyJ[a-zA-Z0-9_-]{10,}\.[a-zA-Z0-9_-]{10,}\.[a-zA-Z0-9_-]{10,}/g, '[REDACTED_JWT]'],
   [PEM_REGEX, '[REDACTED_PEM]'],

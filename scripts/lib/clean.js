@@ -4,7 +4,7 @@ const fs = require("fs");
 const path = require("path");
 const {
   OUT_ARR, SKILLS_BASE, WORKSPACE_SKILLS_BASE, TRASH_DIR,
-  isoNow, isProtected, isConsentDeclined,
+  isoNow, isProtected, isConsentDeclined, validateSkillId,
 } = require("./core");
 const { httpCall, apiCall, missingArg } = require("./http");
 const { scanSkills, scanAllSkills } = require("./skills");
@@ -155,6 +155,9 @@ function handleUninstall(args) {
     return missingArg("Usage: uninstall <skillId> [--confirm] [--source=managed|workspace]");
   }
   const targetId = args[0];
+  if (!validateSkillId(targetId)) {
+    return { error: "invalid_skill_id", hint: "Skill IDs may contain letters, numbers, underscore, hyphen, and dot (1-64 chars)." };
+  }
   if (!args.includes("--confirm")) {
     return { error: "confirm_required", hint: "Add --confirm to execute" };
   }

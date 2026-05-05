@@ -1,7 +1,7 @@
 ---
 name: mapick
 description: Mapick — Skill recommendation & privacy protection for OpenClaw. Scans your local skills, suggests what you're missing, and keeps other skills from seeing your sensitive data.
-metadata: { "openclaw": { "emoji": "🔍", "requires": { "bins": ["node"], "node": ">=22.14" }, "permissions": { "network": ["api.mapick.ai"], "file_read": ["~/.openclaw/skills/","~/.openclaw/workspace/skills/","~/.mapick/logs/","~/.mapick/cache/","/tmp/mapick-report-"], "file_write": ["~/.openclaw/skills/","~/.openclaw/workspace/skills/","~/.mapick/","/tmp/mapick-report-"] } } }
+metadata: { "openclaw": { "emoji": "🔍", "requires": { "bins": ["node"], "node": ">=22.14" }, "permissions": { "network": ["api.mapick.ai","127.0.0.1:3010"], "file_read": ["~/.openclaw/skills/","~/.openclaw/workspace/skills/","~/.mapick/logs/","~/.mapick/cache/","/tmp/mapick-report-"], "file_write": ["~/.openclaw/skills/","~/.openclaw/workspace/skills/","~/.mapick/","/tmp/mapick-report-"] } } }
 ---
 
 # Mapick
@@ -34,16 +34,41 @@ Command: `node scripts/shell.js recommend [limit]` · cached 24h, force refresh 
 Triggers: search, find, look for, anything for X.
 Command: `node scripts/shell.js search <keyword> [limit]`
 
+### Intent: intent (P1 — local gap detection)
+Triggers: user says they want to do something but don't have a skill for it ("I need to scrape data", "can I deploy to k8s", "有没有做代码审查的", "帮我读 PDF"). Also triggered by tool failures / missing capability in the current workflow.
+Command: `node scripts/shell.js intent <natural language description>`
+
+**How it works (privacy-first):**
+1. You detect the gap from the user's natural language.
+2. Call `intent "他们的原话"` — Mapick extracts keywords **locally**.
+3. Only the extracted keywords are sent to the backend for search.
+4. The user's full message never leaves the machine.
+
+**Rendering:**
+- When `items` non-empty: render like `search` results (same gap→fix two-sentence style, same badge rules).
+- Lead with: "基于你说的「{original}」，我提取了关键词「{keywords}」帮你搜了一下" (translate to user's language).
+- When `items` empty or `notice` present: surface the extracted keywords to the user so they can refine. Suggest trying `/mapick recommend` or broadening their description.
+- NEVER show or transmit the raw `original` text — the `original` field in the response is for the AI's rendering context only.
+
+On user pick: **resolve the canonical slug** (see Install command rule below) and run `openclaw skills install <slug>`, then `node scripts/shell.js recommend:track <recId> <skillId> installed`. NEVER pass through raw `installCommands[].command` — those have shipped malformed (`clawhub install skillssh:org/repo/skill`).
+
 On user pick: **resolve the canonical slug** (see Install command rule below) and run `openclaw skills install <slug>`, then `node scripts/shell.js recommend:track <recId> <skillId> installed`. NEVER pass through raw `installCommands[].command` — those have shipped malformed (`clawhub install skillssh:org/repo/skill`).
 
 ### Install command rule (STRICT)
 
-Always render: `openclaw skills install <slug>`. Slug resolution:
-1. Prefer `slug` or canonical short `skillId` (e.g. `code-review`).
-2. Fall back to last segment of `skillssh:org/repo/skill` (e.g. `skillssh:soultrace-ai/soultrace-skill/soultrace` → `soultrace`).
-3. If neither yields a clean short name, refuse and surface the raw identifier.
+Always render: `openclaw skills install <slug>`. Slug resolution uses **resolveCanonicalSlug**:
 
-NEVER show or run: raw `installCommands[].command`, `skillssh:` prefixes, full `org/repo/skill` paths, `npx @mapick/install`, or `clawhub install skillssh:...`. Applies to **both** recommendation install and bundle install.
+**resolveCanonicalSlug(input) → slug:**
+1. If input has `slug` field → use it directly.
+2. If input has `skillId` with no path separators → use it (e.g. `code-review`).
+3. If input has `skillssh:org/repo/skill` format → extract last segment (e.g. `skillssh:soultrace-ai/soultrace-skill/soultrace` → `soultrace`).
+4. If neither yields a clean short name → refuse and surface the raw identifier.
+
+**Applies to:**
+- `/mapick recommend` → on user pick, resolve from `items[].skillId` or `items[].slug`.
+- `/mapick bundle:install <id>` → resolve each entry in `installCommands[]` before running.
+
+NEVER show or run: raw `installCommands[].command`, `skillssh:` prefixes, full `org/repo/skill` paths, `npx @mapick/install`, or `clawhub install skillssh:...`.
 
 ### Rendering: recommend / search
 
@@ -65,9 +90,44 @@ For `search` with empty `items` (or `emptyReason: "no_matches"`): suggest broade
 ### Intent: privacy
 Triggers: privacy, redact, who can see my data, delete my data, forget me, anonymous mode.
 
-### Privacy model: opt-out
+### Privacy model: function-level consent (P3)
 
-Mapick defaults to data-sharing **on** (anonymous device fp + Skill IDs + timestamps; no chat content, no API tokens). Users opt out at any time. There is no "first-install agreement gate" — `recommend`, `search`, `bundle`, `security` all work immediately.
+Mapick defaults to **prompt-on-first-use**: the first time you run a command that needs the network (recommend, search, report, etc.), Mapick asks for consent. No data is sent until you choose one of three options:
+
+- **允许并记住** (`always`) — allow all future network operations without prompting.
+- **仅这一次** (`once`) — allow this one command; prompt again next time.
+- **本地模式** (`declined`) — all remote commands disabled. Use local-only features.
+
+Once a choice is made, it's stored in CONFIG.md. You can change it at any time:
+- `node scripts/shell.js network-consent always`
+- `node scripts/shell.js network-consent declined`
+
+### Consent dialog (P3 — render exactly)
+
+When shell returns `{ intent: "network_consent_required", ... }`, render this dialog in the user's language:
+
+```
+🔒 首次联网确认
+
+Mapick 需要联网来推荐 skill。**不会发送**聊天内容、API key、文件内容。
+
+仅发送：
+• 匿名设备 ID
+• 已安装 skill 名称列表
+• 搜索关键词
+
+选择：
+1. 允许并记住 — 以后不再询问
+2. 仅这一次 — 下次再问
+3. 本地模式 — 只使用本地功能
+
+回复 1、2 或 3。
+```
+
+On user pick:
+- **1 → "允许并记住"**: run `node scripts/shell.js network-consent always`, then re-run the original command.
+- **2 → "仅这一次"**: run `node scripts/shell.js network-consent once`, then re-run the original command. Consent expires after this command.
+- **3 → "本地模式"**: run `node scripts/shell.js network-consent declined`. Do NOT re-run the original command. Show local alternatives instead.
 
 ### Subcommands
 - `node scripts/shell.js privacy status` — current mode (default vs declined) + trusted skills list
@@ -76,6 +136,7 @@ Mapick defaults to data-sharing **on** (anonymous device fp + Skill IDs + timest
 - `node scripts/shell.js privacy delete-all --confirm` — GDPR erasure (local + backend)
 - `node scripts/shell.js privacy consent-decline` — opt out: refuse remote commands client-side
 - `node scripts/shell.js privacy consent-agree` — undo a previous decline (only needed if you ran `consent-decline`)
+- `node scripts/shell.js network-consent <always|once|declined>` — set function-level network consent
 - `node scripts/shell.js privacy log [limit]` — show last N outbound HTTP entries (endpoint + field names + status, never values)
 
 ### Redaction
@@ -101,9 +162,11 @@ raw tool reasoning.
 
 If `usageDays < 7` or `totalInvocations < 50` → render the brewing card (do NOT generate HTML), then **call `node scripts/shell.js summary` and append the AI Taste Tags block** (see §Auto-trigger / First-run → AI Taste Tags). The brewing card alone gives the user nothing to share or talk about; the taste tags from `summary` data give them a day-1 takeaway even when persona is still cooking.
 
+If the `report` response contains `fallback: "local_day1_summary"` or `day1_summary` / `taste_tags`, render those tags immediately. This is the backend-rate-limit / backend-unavailable fallback path: do not stop at the error message, and do not generate HTML. Tell the user the full persona is still brewing, then show the local tags and summary.
+
 Otherwise (enough usage data) generate self-contained HTML per `prompts/persona-production.md`, save only to `/tmp/mapick-report-{id}.html`, then `share <reportId> /tmp/mapick-report-{id}.html <locale>`. Never pass any other local file path to `share`.
 
-Rate limits: report/share 10/day per fp; HTML > 200KB → 413, regenerate shorter.
+Rate limits: report daily quota is temporarily disabled; share remains 10/day per fp. HTML > 200KB → 413, regenerate shorter.
 
 Full flow + brewing card template: `reference/flows.md#persona-report`.
 
@@ -145,12 +208,49 @@ Grade A/B/C rendering details: `reference/rendering.md#security`.
 Triggers: status, overview, dashboard, my skills, how am I doing.
 Command: `node scripts/shell.js status`
 
-Lead with verdict (not dashboard). Surface one hidden insight. End with one specific action.
+**If the shell response has `welcome: true` → render the Welcome card below INSTEAD of normal status. Do NOT skip the welcome card, even if the user has sent status before.**
 
-### First install (`status: "first_install"`)
-Greet, mention scan + skillsCount, suggest `/mapick recommend`, include `privacy` line verbatim. No ASCII logo.
+**Welcome card (P0 — mandatory, render exactly as specified):**
 
-Verdict templates + insight rules + first_install template: `reference/rendering.md#status`, `#first_install`.
+```
+🎉 Mapick 已启动
+
+我会帮你：
+• 发现缺失的 skills（本地识别能力缺口，不上传聊天内容）
+• 检查隐私设置和清理闲置 skills
+• 需要联网时只发送：匿名设备 ID + skill 列表 + 搜索关键词
+
+🎯 你的 AI 品味：「{taste_tags.tags[0]} + {taste_tags.tags[1]} + {taste_tags.tags[2]}」
+{taste_tags.fact}
+{taste_tags.cta}
+
+你可以：
+• 推荐我缺什么 → /mapick recommend
+• 看隐私设置 → /mapick privacy status
+• 关闭主动提醒 → /mapick update:settings off
+```
+
+**Normal status render (welcome already shown):**
+
+Lead with a one-line verdict. Surface one hidden insight. Then ALWAYS render the taste_tags from the shell response:
+```
+🎯 你的 AI 品味：「{taste_tags.tags joined by ' + '}」
+{taste_tags.fact}
+{taste_tags.cta}
+```
+
+The shell response includes a `taste_tags` object. ALWAYS render it after the verdict:
+
+```
+🎯 你的 AI 品味：「{taste_tags.tags joined by ' + '}」
+{taste_tags.fact}
+{taste_tags.cta}
+```
+
+The verdict (1-2 sentences) + the 🎯 block together form a complete /mapick status response. Do NOT output only the verdict.
+
+### First install (`welcome: true`)
+The Welcome card above replaces the old first_install template. Do NOT use the old "first_install" template from rendering.md — always use the Welcome card when `welcome: true`.
 
 ### Intent: diagnose
 Triggers: diagnose, version, loaded path, why old version, shadow, duplicate.
@@ -213,7 +313,15 @@ Command: `node scripts/shell.js uninstall <skillId> --confirm`. Default `--scope
 - **daily**: `node scripts/shell.js daily` — today's digest. Triggers: daily, today, yesterday.
 - **weekly**: `node scripts/shell.js weekly` — week summary. Triggers: weekly, this week, last week.
 
-3-5 bullets max, no decorative emojis or dividers.
+Render `/mapick daily` as a day-1-friendly snapshot, not a dry digest:
+
+1. Start with `📊 今日 Mapick 摘要`.
+2. Summarize `data.yesterday` / `message` in 1-2 lines. If activity is low or zero, say the persona data is still light, then pivot to the local snapshot.
+3. If `day1_summary` and `taste_tags` are present, render an `AI 使用快照` section and append the AI Taste Tags block (§Auto-trigger / First-run → AI Taste Tags). Use the returned `taste_tags` exactly; do not recalculate or invent a different tag. Do not call any extra API.
+4. If `data.top2Recommendations` or `recommendations` are present, show exactly two recommendations under `💡 顺手补两个 Skill`, using the recommend rendering style: one sentence for the gap, one sentence for the fix. Do not show raw scores or JSON.
+5. End with one specific CTA: install one recommendation, run `/mapick clean`, or run `/mapick report` depending on the strongest signal.
+
+Weekly can stay compact: 3-5 bullets max.
 
 ---
 
@@ -223,7 +331,26 @@ Background notify is checked by `/mapick notify`. Automatic cron registration is
 
 On fire/manual run: `node scripts/shell.js notify` → `GET /notify/daily-check?currentVersion=<v>`.
 
-**Silence-first**: `alerts: []` → output absolutely nothing (no acknowledgement). Empty AI output ⇒ no message delivered.
+Exact slash command routing: `/mapick notify` **always** runs `node scripts/shell.js notify`. Do not run `notify:plan` unless the user explicitly asks to set up, install, enable, or configure notifications/reminders.
+
+Manual `/mapick notify`: render a small card even when `alerts: []`:
+
+```
+没有新通知 ✅
+
+检查时间：<checkedAt localized>
+版本更新：无
+僵尸 Skill：无
+其他警报：无
+
+💡 顺手推荐两个 Skill
+1. <skillName> — <why this helps>
+2. <skillName> — <why this helps>
+```
+
+Use `recommendations` from the notify response. Show exactly two if available; if none are available, skip the recommendation section. Keep it short and do not show raw JSON, score, ids, or install commands unless the user asks to install.
+
+Background cron phrasing exactly like `Run /mapick notify`: keep **silence-first** for `alerts: []` to avoid pushing empty daily messages.
 
 `alerts` non-empty → ≤6 lines, friendly tone, version first then zombies.
 
@@ -320,6 +447,22 @@ NEVER auto-confirm. NEVER omit the `what_it_doesnt` line.
 
    Do NOT report a clean "all set" without this check passing. Otherwise, reply with one-line confirmation.
 
+5. **Delivery route verification (post-install check):** For `notify:plan` success path, explicitly guide the user when delivery is not set up:
+   - Run `openclaw chat list --json` after cron registration
+   - If `channels` array is empty or missing, show:
+     ```
+     ⚠️ 通知渠道未配置
+     
+     定时任务已创建，但没有投递目标。请选择：
+     
+     1. 添加 Telegram 频道 → `openclaw chat add --telegram <chat_id>`
+     2. 添加 Slack 频道 → `openclaw chat add --slack <channel_id>`
+     3. 暂时跳过 → 稍后运行 `/mapick notify:plan` 重新设置
+     
+     没有投递渠道，通知将无法送达。
+     ```
+   - If `channels` array has entries, show success with channel name: "✅ 每日提醒已启用，将投递到: {channel_name}"
+
 ### Settings
 
 - `node scripts/shell.js update:settings off` — disable detection entirely.
@@ -334,11 +477,59 @@ Mapick **does not install, upgrade, remove, or modify other Skills unless you ex
 
 ---
 
+## 11. Radar（机会雷达）(P2)
+
+Daily low-frequency skill gap radar. Runs silently — only speaks when it finds something.
+
+### Intent: radar
+Triggers: `/mapick radar`, triggered once per day by the AI after init.
+Command: `node scripts/shell.js radar`
+
+Returns either:
+- `{ silent: true, reason: "..." }` — absolutely nothing to do. Do not render, do not acknowledge.
+- `{ silent: false, gaps: [...] }` — up to 2 skill gaps with categories.
+
+### Frequency control (automatic)
+- Max 1 run per day (`last_radar_at` cooldown).
+- Same category silent for 7 days.
+- User rejects a category 2 times → category muted for 14 days.
+
+### Rendering: radar (non-silent)
+
+Lead with a single sentence that connects to something the user actually does:
+> 今天发现一个能力缺口：你最近在处理 X/Twitter 数据，但当前只有 xurl，没有通用跨平台抓取。
+
+Then for each gap (max 2), render two sentences like recommend:
+1. The gap — what you're doing without the right tool.
+2. The fix — skill name + safety badge + what manual work disappears.
+
+End with a single CTA:
+> 回复 1 或 2 安装，或 "skip" 暂时不要。
+
+### Tracking rejections
+
+When user says "skip" / "暂时不要" / "no" to a specific radar gap, call:
+```
+node scripts/shell.js radar:reject <category>
+```
+
+This increments the rejection counter for that category so the radar won't nag.
+
+---
+
 ## Auto-trigger / First-run
 
 On new Mapick session, run `node scripts/shell.js init` (idempotent, 30-min cooldown). Detail: `reference/lifecycle.md#auto-trigger-on-new-conversation`.
 
-If CONFIG.md lacks `first_run_complete`: run `node scripts/shell.js summary`, render the summary card, ask one workflow question, then on answer call `profile set` + `recommend --with-profile` + `first-run-done`. Output summary AND question in a SINGLE response.
+**Three scenarios that MUST show taste tags:**
+
+1. **First install** — `init` returns `status: "first_install"`: render per §Intent: status → First install template (includes 🎯 tags as centerpiece).
+2. **Daily / periodic** — `init` returns normal status data: render a compact status line, then **always append 🎯 tags**. Make this feel like a daily fortune cookie.
+3. **Post-upgrade** — if `init` runs after a version bump: same as scenario 2, but add "Mapick 已升级到 v<version>" before the tags.
+
+If CONFIG.md lacks `first_run_complete`: run `node scripts/shell.js summary`, render the summary card WITH taste tags, ask one workflow question, then on answer call `profile set` + `recommend --with-profile` + `first-run-done`. Output summary AND question in a SINGLE response.
+
+**IMPORTANT: Taste tags are MANDATORY in every init/status/summary/first-run render.** Never show just a number dump — the 🎯 line is the only thing users share. Without it, there is zero virality.
 
 ### Rendering: summary card
 
@@ -373,13 +564,24 @@ context window. Every conversation, your agent loads them for nothing.
 
 🔒 Outbound: anonymous device id + skill IDs you act on + timestamps.
    Audit: /mapick privacy log    Decline: /mapick privacy consent-decline
+
+---
+🎯 你的 AI 品味：「{quantity_tag} + {efficiency_tag} + {stack_tag}」
+{brag_line}
+📤 测测你朋友的 → /mapick status
 ```
 
+After rendering the summary card, you MUST generate the AI Taste Tags block (the 🎯 section above). Use the lookup tables under §AI Taste Tags (below) with the `total`, `active`, `never_used`, `top_used` values from the summary data. This block is MANDATORY — never skip it after a summary card, even when total <= 3 or never_used == 0. Only skip when `total == 0`.
+
 If `never_used == 0 && idle_30 == 0`: skip negativity → "Clean setup. Top 10%." If `total <= 3`: skip the zombie angle → "Just getting started — let me find tools that match your workflow." If `has_backend: false`: skip the heavy-hitters + safety-check sections; say "Backend offline; counts only."
+
+**After ANY summary card render (regardless of branch taken above), you MUST always append the AI Taste Tags block.** The tags section uses the same `total`, `active`, `never_used`, `top_used` fields from the summary data. Never omit it — the tags are the shareable takeaway. Only skip when `total == 0`.
 
 ### AI Taste Tags (generate from summary data, no extra API call)
 
 Generate **2–3 taste tags** from the data already returned by `summary` (`total`, `active`, `never_used`, `idle_30`, `top_used`). These tags are a lightweight day-1 artifact — they replace nothing, they augment.
+
+If a command response already includes `taste_tags` and `taste_fact`, render those values exactly and skip recomputing the lookup locally. This prevents arithmetic drift in the model response.
 
 Two contexts to apply:
 
@@ -440,23 +642,30 @@ Full 6-step flow: `reference/flows.md#first-run-summary`.
 
 User-facing:
 
-| Command                  | Purpose                                              |
-| ------------------------ | ---------------------------------------------------- |
-| `/mapick`                | Status overview (alias for `status`)                 |
-| `/mapick status`         | Detailed skill status                                |
-| `/mapick scan`           | Force re-scan                                        |
-| `/mapick clean`          | List zombies, pick which to remove                   |
-| `/mapick recommend`      | Recommendations                                      |
-| `/mapick search <kw>`    | Search skills                                        |
-| `/mapick bundle`         | Browse / install bundles                             |
-| `/mapick security <id>`  | Safety check                                         |
-| `/mapick report`         | Persona report                                       |
-| `/mapick privacy <sub>`  | status / trust / untrust / delete-all / consent-*    |
-| `/mapick workflow`       | Frequent sequences                                   |
-| `/mapick daily`          | Daily digest                                         |
-| `/mapick weekly`         | Weekly summary                                       |
-| `/mapick profile clear`  | Reset workflow profile + retrigger first-run summary |
-| `/mapick diagnose`       | Show loaded version/path and workspace shadow risks  |
+| Command                  | Purpose                                              | Trigger phrases (any language) |
+| ------------------------ | ---------------------------------------------------- | ------------------------------ |
+| `/mapick`                | Status overview (alias for `status`)                 | status, overview, dashboard, my skills |
+| `/mapick status`         | Detailed skill status                                | how am I doing, 技能状态 |
+| `/mapick scan`           | Force re-scan                                        | rescan, refresh skills |
+| `/mapick clean`          | List zombies, pick which to remove                   | zombies, dead skills, 清理 |
+| `/mapick recommend`      | Recommendations                                      | suggest skills, 缺什么, what should I install |
+| `/mapick search <kw>`    | Search skills                                        | find skill, 搜一下 |
+| `/mapick intent <desc>`  | Natural language → local keywords → search           | I need X, 有没有 Y 的工具, 帮我找 |
+| `/mapick bundle`         | Browse / install bundles                             | workflow pack, skill pack, 技能包 |
+| `/mapick security <id>`  | Safety check                                         | is X safe, security score, trust, 安全吗 |
+| `/mapick report`         | Persona report                                       | analyze me, my persona, developer type |
+| `/mapick privacy <sub>`  | status / trust / untrust / delete-all / consent-*    | privacy, 隐私, 数据保护 |
+| `/mapick workflow`       | Frequent sequences                                   | routine, pipeline, skill chain |
+| `/mapick daily`          | Daily digest                                         | today, yesterday, 今日摘要 |
+| `/mapick weekly`         | Weekly summary                                       | this week, last week, 周报 |
+| `/mapick stats`          | Global & personal stats (installs, conversions)      | statistics, 数据统计 |
+| `/mapick stats --detail` | Detailed personal stats + accuracy trend             | my stats, 个人统计, 详细统计 |
+| `/mapick stats user`     | Alias for stats --detail                             | 个人数据 |
+| `/mapick radar`          | Daily gap radar (silent when nothing to report)      | radar, 雷达, 机会 |
+| `/mapick profile clear`  | Reset workflow profile + retrigger first-run summary | reset profile, 重置配置 |
+| `/mapick diagnose`       | Show loaded version/path and workspace shadow risks  | version, loaded path, 诊断, 版本信息 |
+| `/mapick install`        | Run install.sh (Phase 1 setup)                      | install mapick, 安装 mapick, set up mapick, 配置 mapick |
+| `/mapick diagnose --install-check` | Verify installation status                 | is mapick installed, 检查安装, verify setup |
 
 Internal (AI invokes; users don't type):
 `clean:track <skillId>` · `bundle:track-installed <id>` · `summary` · `profile set/get` · `first-run-done` · `recommend --with-profile` · `recommend:track <recId> <skillId> installed` · `security:report` · `notify` · `share <reportId> <htmlFile> [locale]`

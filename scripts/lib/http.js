@@ -1,6 +1,7 @@
 const fs = require("fs");
 const path = require("path");
 const os = require("os");
+const http = require("http");
 const https = require("https");
 const { API_BASE, deviceFp, redactForUpload, isoNow } = require("./core");
 
@@ -28,8 +29,10 @@ const { API_BASE, deviceFp, redactForUpload, isoNow } = require("./core");
  * POST /users/:fp/profile-text        redacted profileText, tags      /mapick profile set
  * GET  /notify/daily-check            currentVersion, repo            daily cron
  *
- * Base URL: https://api.mapick.ai/api/v1 (also declared in SKILL.md
- * metadata.openclaw.permissions.network).
+ * Base URL: see API_BASE in lib/core.js. Production is
+ * https://api.mapick.ai/api/v1 (also declared in SKILL.md
+ * metadata.openclaw.permissions.network). Local test builds may temporarily
+ * use http://127.0.0.1:3010/api/v1 and must be reverted before publishing.
  *
  * NEVER sent: arbitrary local file contents, chat history, API tokens,
  * credentials, Skill source code, environment variables. The only outgoing
@@ -55,7 +58,7 @@ const { API_BASE, deviceFp, redactForUpload, isoNow } = require("./core");
 // stripped before matching.
 const ALLOWED_ENDPOINTS = [
   /^\/assistant\/(status|workflow|daily-digest|weekly)\/[a-f0-9]{16}$/,
-  /^\/recommendations\/(feed|track)$/,
+  /^\/recommendations\/(feed|track|contextual)$/,
   /^\/skills\/live-search$/,
   /^\/skills\/check-updates$/,
   /^\/users\/[a-f0-9]{16}\/(zombies|profile-text)$/,
@@ -69,6 +72,10 @@ const ALLOWED_ENDPOINTS = [
   /^\/report\/persona$/,
   /^\/share\/upload$/,
   /^\/skill\/[\w-]+\/(security|report)$/,
+  /^\/stats\/public$/,
+  /^\/stats\/user\/[a-f0-9]{16}$/,              // personal stats (Phase 3)
+  /^\/perception\/accuracy-trend$/,             // recommendation accuracy (Phase 3)
+  /^\/perception\/summary$/,                    // perception summary (Phase 3)
   /^\/notify\/daily-check$/,
 ];
 
@@ -274,7 +281,8 @@ async function httpCall(method, endpoint, body = null) {
 function requestJson(url, method, body) {
   return new Promise((resolve, reject) => {
     const payload = body ? JSON.stringify(body) : null;
-    const req = https.request(url, {
+    const transport = url.protocol === "http:" ? http : https;
+    const req = transport.request(url, {
       method,
       headers: {
         "Content-Type": "application/json",

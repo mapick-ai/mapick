@@ -83,20 +83,22 @@ When `matched === true`, localize `detailsEn` and apply Display rule (STRICT):
 
 ## status
 
-1. **Lead with a verdict, not a dashboard.** Not "you have 47 skills" but: "You have 47 skills installed but only use 14 of them. Your activation rate is 30% — that puts you in the bottom quarter. Most users who clean up see their agent speed double."
+**Output two blocks. Block 2 is the most important.**
 
-2. **Surface one hidden insight** the user didn't ask for:
-   - `zombie_count > 10`: "Fun fact: you have more dead skills than active ones."
-   - top skill > 10x/day: "You use <skill> more than 95% of users. Have you tried <related-skill>?"
-   - `activation_rate > 80%`: "Top 10%. You only install what you actually use."
-   - All Grade A: "All your skills are Grade A. Clean setup."
+**Block 1 — Verdict (1-2 lines max):**
+1. Lead with a verdict, not a dashboard.
+2. Surface one hidden insight.
+3. End with one specific action.
 
-3. **End with one specific action**, not a menu:
-   - zombies > 5: "Say 'clean up' to reclaim <X>% of your context."
-   - `activation_rate > 70%` and no zombies: "You're in great shape. Try 'analyze me' to see your developer persona."
-   - Otherwise: "Say 'recommend' to find what you're missing."
+**Block 2 — AI Taste Tags (MANDATORY):**
+```
+🎯 你的 AI 品味：「{tag1} + {tag2} + {tag3}」
+{brag_line}
+📤 测测你朋友的 → /mapick status
+```
+Generate tags from the shell response using lookup tables in SKILL.md §AI Taste Tags. Only skip when `total == 0`.
 
-Do NOT show a command list. Answer "how am I doing", then suggest ONE next step.
+Block 1 is context. Block 2 is what users share. Never output only Block 1.
 
 ## first_install
 
@@ -104,16 +106,25 @@ Shell returns:
 ```json
 {
   "status": "first_install",
-  "data": { "deviceFingerprint": "...", "skillsCount": 3, "skillNames": ["tasa", "mapick", "stage"] },
+  "data": { "skillsCount": 3, "skillNames": ["tasa", "mapick", "stage"] },
   "privacy": "Anonymous by design. No registration. ..."
 }
 ```
 
 Render in user's language:
-1. Greet warmly, one sentence. ("Mapick is ready.")
-2. Mention scan + `skillsCount` skills found. If `>0`, list up to 5 from `skillNames`. If `0`, say canvas is empty and offer discovery.
-3. One next step. ("Try `/mapick recommend` to see what might help you.")
-4. Include `privacy` line verbatim (translate literally — substance: anonymous, no registration).
+
+1. Greet warmly, one sentence. ("🎉 Mapick 已就绪！扫描到 <skillsCount> 个 Skill。")
+
+2. **Immediately show AI Taste Tags as the centerpiece.** This is the user's day-1 identity reveal — the moment they go "whoa, I want to share this". Generate tags from the summary data per the lookup tables in SKILL.md §Auto-trigger / First-run → AI Taste Tags:
+   ```
+   🎯 你的 AI 品味：「{tag1} + {tag2} + {tag3}」
+   {brag_line}
+   📤 测测你朋友的 → /mapick status
+   ```
+
+3. One next step: "Try `/mapick recommend` to find your next skill."
+
+4. Include `privacy` line verbatim.
 
 **Do not** render any ASCII logo, prompt for registration, or auto-call follow-up commands.
 
@@ -147,6 +158,101 @@ When user replies:
 3. **Multiple**: order by impact — zombies first, version second. Blank line between.
 
 No JSON echo. No "your daily Mapick check found:" preamble. No timestamps, no run-id.
+
+## notify:plan (delivery verification)
+
+**Success with delivery route configured:**
+```
+✅ 每日提醒已启用
+
+检查时间：{checkedAt}
+投递渠道：{channel_name}
+下次运行：{next_run_time}
+
+管理提醒：/mapick notify:status
+```
+
+**Success but no delivery route:**
+```
+⚠️ 定时任务已创建，但没有投递目标
+
+Mapick 会每天检查更新和僵尸 Skill，但无法通知你。
+
+请选择投递渠道：
+1. Telegram → openclaw chat add --telegram <chat_id>
+2. Slack    → openclaw chat add --slack <channel_id>
+3. 暂时跳过 → 稍后运行 /mapick notify:plan 重新设置
+
+没有投递渠道，通知将无法送达。
+```
+
+**Verification steps after `notify:plan` success:**
+1. Run `openclaw chat list --json`
+2. Check if `channels` array is non-empty
+3. If empty → render the "no delivery route" template above
+4. If non-empty → show channel name(s) in success message
+
+**Failure during setup:**
+```
+❌ 设置失败
+
+{error_message}
+
+常见问题：
+• cron 权限不足 → 检查 OpenClaw 配置
+• 网络问题 → 重试 /mapick notify:plan
+
+详细诊断：/mapick diagnose
+```
+
+## install.sh (post-install status)
+
+**After running install.sh successfully:**
+```
+✅ Mapick 安装完成
+
+版本：{version}
+路径：{install_path}
+Node：{node_version}
+
+下一步：
+• /mapick status     → 查看技能状态
+• /mapick recommend  → 发现缺失的 Skill
+• /mapick privacy status → 检查隐私设置
+
+遇到问题？运行 /mapick diagnose 检查环境。
+```
+
+**Installation check (diagnose --install-check):**
+```
+🔍 Mapick 安装状态
+
+✅ 已安装
+   版本：{version}
+   路径：{install_path}
+   Node：{node_version}
+   配置：{config_status}
+
+{issues}
+
+{recommendations}
+```
+
+**When issues found:**
+- `issues` array: list each issue with ⚠️ prefix
+- `recommendations` array: actionable fix for each issue
+
+**When not installed:**
+```
+❌ Mapick 未安装
+
+请运行安装脚本：
+curl -fsSL https://get.mapick.ai/install.sh | bash
+
+或手动安装：
+git clone https://github.com/mapick/mapick.git ~/.openclaw/skills/mapick
+cd ~/.openclaw/skills/mapick && pnpm install
+```
 
 ## summary card
 
