@@ -373,16 +373,12 @@ setInterval(refresh, 30_000);
 
 // ── Local stats proxy ──────────────────────────────────────────
 // The dashboard fetches /api/stats/local from this server, which
-// runs the local mapick stats command and returns the JSON.
-function getLocalStats() {
-  const { execFileSync } = require("child_process");
+// calls the stats handler in-process and returns the JSON.
+async function getLocalStats() {
   try {
-    const shellPath = path.join(__dirname, "shell.js");
-    const out = execFileSync(process.execPath, [shellPath, "stats"], {
-      encoding: "utf8",
-      timeout: 10_000,
-    });
-    return JSON.parse(out);
+    const { handleStats } = require("./lib/misc");
+    const result = await handleStats([], {});
+    return result;
   } catch (e) {
     return {
       events_logged: 0,
