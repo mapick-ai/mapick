@@ -195,6 +195,9 @@ async function handle(args, ctx) {
       writeConfig("consent_agreed_at", now);
       deleteConfig("consent_declined");
       deleteConfig("consent_declined_at");
+      // Restore default network access so remote commands are unblocked
+      writeConfig("network_consent", "always");
+      writeConfig("network_consent_at", now);
       // Cron failure is non-fatal — consent itself already succeeded.
       const cronResult = registerNotifyCron();
       return {
