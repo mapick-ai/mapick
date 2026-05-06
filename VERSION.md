@@ -2,6 +2,15 @@
 
 All notable changes to Mapick will be documented in this file.
 
+## v1.0.17 - 2026-05-06
+
+### Fixed
+
+- Resolve ClawHub security scan findings
+- SKILL.md: remove 127.0.0.1:3010 from network permissions
+- stats-dashboard.js: replace execFileSync with in-process handleStats()
+- core.js: API_BASE restored to production URL
+
 ## v1.0.16 - 2026-05-06
 
 ### Fixed

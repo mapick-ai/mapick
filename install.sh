@@ -10,7 +10,7 @@
 #   bash install.sh
 #
 # Options (via environment variables):
-#   MAPICK_VERSION=v1.0.16                  Install specific version
+#   MAPICK_VERSION=v1.0.17                  Install specific version
 #   MAPICK_REPO=owner/repo                  Override source repo
 #   MAPICK_DISABLE_WORKSPACE_DUPLICATE=1    Move shadowing workspace copy aside
 #   MAPICK_INSTALL_ASSUME_YES=1             Auto-accept overwrite/upgrade
