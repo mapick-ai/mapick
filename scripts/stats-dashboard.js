@@ -234,7 +234,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
   </div>
 
   <footer>
-    Mapick v0.0.15 · 数据每 30 秒自动刷新 · 后端: 127.0.0.1:3010
+    Mapick v0.0.15 · 数据每 30 秒自动刷新 · 后端: api.mapick.ai
   </footer>
 </div>
 
