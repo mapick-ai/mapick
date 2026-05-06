@@ -2,6 +2,12 @@
 
 All notable changes to Mapick will be documented in this file.
 
+## v1.0.18 - 2026-05-06
+
+### Fixed
+
+- stats-dashboard.js: HTML now shows production backend URL
+
 ## v1.0.17 - 2026-05-06
 
 ### Fixed
