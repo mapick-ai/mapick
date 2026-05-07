@@ -2,6 +2,12 @@
 
 All notable changes to Mapick will be documented in this file.
 
+## v1.0.20 - 2026-05-07
+
+### Fixed
+
+- SKILL.md: require explicit user confirmation before persona report upload (ClawScan flagged auto-upload without consent)
+
 ## v1.0.19 - 2026-05-07
 
 ### Fixed
