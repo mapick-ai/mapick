@@ -109,26 +109,36 @@ async function main() {
   // P3: Function-level consent gate. On first network operation, prompt the
   // user before sending any data. Once consent is set (always/once/declined),
   // this gate is skipped.
-  if (privacy.isRemoteCommand(command, args) && privacy.isFirstNetworkUse(ctx.config)) {
-    console.log(JSON.stringify(privacy.networkConsentPrompt(ctx)));
-    return;
-  }
+  // NOTE: declined check MUST come before first-use to avoid prompting declined
+  // users with network_consent_required (they should get disabled_in_local_mode).
+
+  // Commands that have local fallback and should not be blocked by consent gate.
+  // These commands try remote first, then fall back to local scanning when declined.
+  const LOCAL_FALLBACK_COMMANDS = new Set(["security"]);
 
   // P3 declined gate: network_consent === "declined" blocks remote commands.
   // update:check is exempt — its handler produces a graceful items: [] fallback.
-  if (privacy.isRemoteCommand(command, args) && ctx.config.network_consent === "declined" && command !== "update:check") {
+  // LOCAL_FALLBACK_COMMANDS are exempt — they fall back to local scanning.
+  if (privacy.isRemoteCommand(command, args) && ctx.config.network_consent === "declined"
+      && command !== "update:check" && !LOCAL_FALLBACK_COMMANDS.has(command)) {
     console.log(JSON.stringify({
-      error: "network_consent_declined",
+      error: "disabled_in_local_mode",
       mode: "local_only",
-      hint: "You chose local mode. Run `node scripts/shell.js network-consent always` to allow network access, or use local-only features.",
+      hint: "You opted out earlier. Run `node scripts/shell.js privacy consent-agree` to resume — same anonymous flow new installs are on.",
     }));
     return;
   }
 
   // Opt-out model: global consent_declined blocks remote commands.
-  // update:check is exempt — its handler produces a graceful items: [] fallback.
-  if (privacy.isRemoteCommand(command, args) && core.isConsentDeclined(ctx.config) && command !== "update:check") {
+  // update:check and LOCAL_FALLBACK_COMMANDS are exempt.
+  if (privacy.isRemoteCommand(command, args) && core.isConsentDeclined(ctx.config)
+      && command !== "update:check" && !LOCAL_FALLBACK_COMMANDS.has(command)) {
     console.log(JSON.stringify(privacy.remoteAccessError(ctx.config)));
+    return;
+  }
+
+  if (privacy.isRemoteCommand(command, args) && privacy.isFirstNetworkUse(ctx.config)) {
+    console.log(JSON.stringify(privacy.networkConsentPrompt(ctx)));
     return;
   }
 

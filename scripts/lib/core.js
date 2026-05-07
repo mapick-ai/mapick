@@ -32,7 +32,7 @@ const REMOTE_COMMANDS = new Set([
   "recommend", "recommend:track", "search", "intent",
   "workflow", "daily", "weekly", "notify", "report",
   "security", "security:report", "clean:track", "share",
-  "bundle", "update:check", "update:track", "upgrade:plan",
+  "bundle", "bundle:track-installed", "update:check", "update:track", "upgrade:plan",
 ]);
 
 // Two skill roots OpenClaw loads from. Workspace is loaded BEFORE managed
@@ -209,7 +209,9 @@ function validateSkillId(id) {
 function readInstalledVersion() {
   const versionFile = path.join(CONFIG_DIR, ".version");
   try {
-    const v = fs.readFileSync(versionFile, "utf8").trim();
+    let v = fs.readFileSync(versionFile, "utf8").trim();
+    // Strip BOM (U+FEFF) and carriage returns for robustness.
+    v = v.replace(/^\uFEFF/, "").replace(/\r/g, "");
     if (v) return v;
   } catch {}
 
@@ -235,11 +237,19 @@ function readInstalledVersion() {
     }
   } catch {}
 
-  // Fallback：解析 VERSION.md 第一个 `## vX.Y.Z` 标题（跳过 `## Unreleased`）。
+  // Fallback 1: _meta.json (ClawHub installs write this during installation).
+  try {
+    const metaPath = path.join(CONFIG_DIR, "_meta.json");
+    const raw = fs.readFileSync(metaPath, "utf8").replace(/^\uFEFF/, "").replace(/\r/g, "");
+    const meta = JSON.parse(raw);
+    if (meta.version) return meta.version;
+  } catch {}
+
+  // Fallback 2: 解析 VERSION.md 第一个 `## vX.Y.Z` 标题（跳过 `## Unreleased`）。
   // VERSION.md 与 CONFIG_DIR 同级，是项目里唯一权威的版本时间线。
   const versionMd = path.join(CONFIG_DIR, "VERSION.md");
   try {
-    const lines = fs.readFileSync(versionMd, "utf8").split("\n");
+    const lines = fs.readFileSync(versionMd, "utf8").replace(/^\uFEFF/, "").replace(/\r/g, "").split("\n");
     for (const line of lines) {
       const m = line.match(/^##\s+(v\d+\.\d+\.\d+(?:-[\w.]+)?)\b/);
       if (m) return m[1];

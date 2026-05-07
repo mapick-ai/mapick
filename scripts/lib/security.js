@@ -83,14 +83,23 @@ function scanLocal(skillId) {
   };
 }
 
-async function handleSecurity(args) {
+async function handleSecurity(args, ctx = {}) {
   if (args.length < 1) return missingArg("Usage: security <skillId>");
   const skillId = args[0];
   if (!validateSkillId(skillId)) {
     return { error: "invalid_skill_id", hint: "Skill IDs may contain letters, numbers, underscore, hyphen, and dot (1-64 chars)." };
   }
-  const remote = await apiCall("GET", `/skill/${skillId}/security`, null, "security");
-  if (!remote.error) return remote;
+
+  // When consent is declined, skip remote API and go directly to local scan.
+  const consentDeclined = ctx.config && (
+    ctx.config.network_consent === "declined" ||
+    ctx.config.consent_declined === "true"
+  );
+
+  if (!consentDeclined) {
+    const remote = await apiCall("GET", `/skill/${skillId}/security`, null, "security");
+    if (!remote.error) return remote;
+  }
 
   const local = scanLocal(skillId);
   if (!local.ok) {

@@ -84,7 +84,13 @@ async function fetchRecommendations(limit = 2) {
 }
 
 async function handleBundle(args, ctx) {
-  const sub = args[0];
+  // When command is "bundle:track-installed", synthesize sub from ctx.command
+  // so the handler correctly routes to the track-installed branch.
+  let sub = args[0];
+  if (ctx.command === "bundle:track-installed") {
+    sub = "track-installed";
+  }
+
   if (sub === "recommend") {
     return apiCall(
       "GET",

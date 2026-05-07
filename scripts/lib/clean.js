@@ -72,7 +72,36 @@ function backupSkill(skillPath) {
 
   const name = path.basename(skillPath);
   const backupPath = path.join(TRASH_DIR, `${name}_${Date.now()}`);
-  fs.cpSync(skillPath, backupPath, { recursive: true });
+
+  // Stage→rename two-step: copy to a temporary directory first, then move
+  // into TRASH_DIR. This avoids fs.cpSync recursing into trash/ inside the
+  // skill itself (which would create trash/trash/... → ENAMETOOLONG).
+  const tmpPath = backupPath + ".tmp";
+  fs.mkdirSync(tmpPath, { recursive: true });
+
+  // Copy with filter: exclude trash, .git, node_modules to prevent recursion.
+  const EXCLUDE_DIRS = new Set(["trash", ".git", "node_modules"]);
+  function copyRecursive(src, dest) {
+    for (const entry of fs.readdirSync(src, { withFileTypes: true })) {
+      if (EXCLUDE_DIRS.has(entry.name)) continue;
+      const srcPath = path.join(src, entry.name);
+      const destPath = path.join(dest, entry.name);
+      if (entry.isDirectory()) {
+        fs.mkdirSync(destPath, { recursive: true });
+        copyRecursive(srcPath, destPath);
+      } else if (entry.isSymbolicLink()) {
+        const linkTarget = fs.readlinkSync(srcPath);
+        fs.symlinkSync(linkTarget, destPath);
+      } else {
+        fs.copyFileSync(srcPath, destPath);
+      }
+    }
+  }
+
+  copyRecursive(skillPath, tmpPath);
+
+  // Move temp directory to final backup path.
+  fs.renameSync(tmpPath, backupPath);
   return backupPath;
 }
 

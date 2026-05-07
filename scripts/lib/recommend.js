@@ -289,6 +289,31 @@ async function handleTrack(args, ctx) {
   if (!VALID_TRACK_ACTIONS.includes(action)) {
     return { error: "invalid_action", valid: VALID_TRACK_ACTIONS };
   }
+
+  // Short circuit: no active recId — skip backend request.
+  if (!recId || !recId.trim()) {
+    return {
+      intent: "recommend:track",
+      short_circuit: "no_active_rec_id",
+      action,
+      skillId,
+    };
+  }
+
+  // Short circuit: consent declined — skip backend request.
+  if (ctx.config && (
+    ctx.config.network_consent === "declined" ||
+    ctx.config.consent_declined === "true"
+  )) {
+    return {
+      intent: "recommend:track",
+      short_circuit: "local_only_mode",
+      action,
+      skillId,
+      recId,
+    };
+  }
+
   return apiCall(
     "POST",
     "/recommendations/track",
