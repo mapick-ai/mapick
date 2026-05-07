@@ -153,7 +153,7 @@ function classifyFetchError(err) {
   return "unknown";
 }
 
-async function httpCall(method, endpoint, body = null) {
+async function httpCall(method, endpoint, body = null, intent = null) {
   const t0 = Date.now();
   const ts = isoNow();
 
@@ -272,6 +272,8 @@ async function httpCall(method, endpoint, body = null) {
       status,
       duration_ms: Date.now() - t0,
     };
+    if (intent) entry.intent = intent;
+    if (body && body.action) entry.action = body.action;
     if (redactedPayload) entry.redacted_payload = true;
     logOutbound(entry);
   }
@@ -310,7 +312,7 @@ function requestJson(url, method, body) {
 }
 
 async function apiCall(method, endpoint, body, intent) {
-  const r = await httpCall(method, endpoint, body);
+  const r = await httpCall(method, endpoint, body, intent);
   if (intent) r.intent = intent;
   return r;
 }
