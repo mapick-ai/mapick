@@ -96,8 +96,9 @@ async function handleSecurity(args, ctx = {}) {
     ctx.config.consent_declined === "true"
   );
 
+  let remote = null;
   if (!consentDeclined) {
-    const remote = await apiCall("GET", `/skill/${skillId}/security`, null, "security");
+    remote = await apiCall("GET", `/skill/${skillId}/security`, null, "security");
     if (!remote.error) return remote;
   }
 
@@ -109,7 +110,7 @@ async function handleSecurity(args, ctx = {}) {
       local_scan: true,
       skillId,
       reason: local.reason,
-      backend_error: remote.error,
+      backend_error: remote ? remote.error : null,
       hint:
         local.reason === "not_installed_locally"
           ? "Skill not installed locally; can't scan offline. Try again when the backend is reachable."
@@ -144,7 +145,7 @@ async function handleSecurity(args, ctx = {}) {
     alternatives: [],
     lastScannedAt: isoNow(),
     note: "Backend unavailable; this is a local pattern-only scan covering the code-analysis dimension. Permissions, community feedback, and alternatives are not available offline.",
-    backend_error: remote.error,
+    backend_error: remote ? remote.error : null,
   };
 }
 
