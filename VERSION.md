@@ -2,6 +2,13 @@
 
 All notable changes to Mapick will be documented in this file.
 
+## v1.0.22 - 2026-05-07
+
+### Fixed
+
+- bundle:track-installed: fix bundleId extraction for colon-command form (args[1] → args[1] || args[0])
+- security.js: initialize `remote` variable before consent gate to prevent ReferenceError
+
 ## v1.0.21 - 2026-05-07
 
 ### Fixed

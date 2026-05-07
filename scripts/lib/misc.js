@@ -130,13 +130,16 @@ async function handleBundle(args, ctx) {
     }
     return r;
   }
-  if (sub === "track-installed" && args[1]) {
-    return apiCall(
-      "POST",
-      "/bundle/seed",
-      { bundleId: args[1], userId: ctx.fp },
-      "bundle:track-installed",
-    );
+  if (sub === "track-installed") {
+    const bundleId = args[1] || args[0];
+    if (bundleId) {
+      return apiCall(
+        "POST",
+        "/bundle/seed",
+        { bundleId, userId: ctx.fp },
+        "bundle:track-installed",
+      );
+    }
   }
   if (sub) {
     return apiCall("GET", `/bundle/${sub}`, null, "bundle:detail");
