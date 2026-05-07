@@ -116,12 +116,12 @@ async function handleRadar(_args, ctx) {
     if (recentSkills.length > 0) {
       contextualUrl += `&recentSkills=${encodeURIComponent(recentSkills.join(","))}`;
     }
-    const resp = await httpCall("GET", contextualUrl);
+    const resp = await httpCall("GET", contextualUrl, null, "radar");
     if (!resp.error) {
       candidates = resp.items || resp.recommendations || [];
     } else {
       // Fall back to feed endpoint on contextual error
-      const feedResp = await httpCall("GET", `/recommendations/feed?limit=${Math.min(OUT_ARR, 10)}`);
+      const feedResp = await httpCall("GET", `/recommendations/feed?limit=${Math.min(OUT_ARR, 10)}`, null, "radar");
       candidates = feedResp.items || feedResp.recommendations || [];
     }
   } catch {

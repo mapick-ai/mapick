@@ -175,6 +175,8 @@ async function aggregateSummary(skills, config) {
     const status = await httpCall(
       "GET",
       `/assistant/status/${config.device_fp}?compact=1`,
+      null,
+      "status",
     );
     if (status && !status.error) {
       summary.has_backend = true;

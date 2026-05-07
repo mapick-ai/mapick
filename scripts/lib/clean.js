@@ -116,6 +116,8 @@ async function handleClean(_args, ctx) {
   const cleanResp = await httpCall(
     "GET",
     `/users/${ctx.fp}/zombies?limit=${OUT_ARR}`,
+    null,
+    "clean",
   );
   // Network / 5xx from backend → fall back to local heuristic instead of
   // surfacing an error. Pre-existing behavior leaked the error object as

@@ -52,7 +52,7 @@ async function handleNotify() {
   params.set("repo", "mapick-ai/mapick");
   params.set("compact", "1");
   params.set("limit", String(OUT_ARR));
-  const resp = await httpCall("GET", `/notify/daily-check?${params}`);
+  const resp = await httpCall("GET", `/notify/daily-check?${params}`, null, "notify");
   const recommendations = await fetchRecommendations(2);
   // Silence-first: backend/network failure → empty alerts.
   if (resp.error) {
@@ -75,7 +75,7 @@ async function handleNotify() {
 
 async function fetchRecommendations(limit = 2) {
   try {
-    const resp = await httpCall("GET", `/recommendations/feed?limit=${limit}`);
+    const resp = await httpCall("GET", `/recommendations/feed?limit=${limit}`, null, "recommendations");
     if (resp.error) return [];
     return (resp.items || resp.recommendations || []).slice(0, limit);
   } catch {
@@ -163,7 +163,7 @@ async function attachDay1Summary(result, ctx) {
 }
 
 async function handleReport(_args = [], ctx = {}) {
-  const reportResp = await httpCall("GET", `/report/persona?compact=1`);
+  const reportResp = await httpCall("GET", `/report/persona?compact=1`, null, "report");
   if (reportResp.error === "rate_limit") {
     return attachDay1Summary(
       {
@@ -303,6 +303,7 @@ async function handleProfile(args, ctx) {
           "POST",
           `/users/${ctx.fp}/profile-text`,
           { profileText: displayText, profileTags: tags },
+          "profile:set",
         );
         uploaded = !resp.error;
       }

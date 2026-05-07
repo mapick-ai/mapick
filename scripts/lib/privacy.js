@@ -113,7 +113,7 @@ async function handle(args, ctx) {
         userId: fp,
         skillId: args[1],
         permission: "unredacted",
-      });
+      }, "privacy:trust");
       result.intent = "privacy:trust";
       if (result.error) return result;
       const trusted = config.trusted_skills
@@ -146,7 +146,7 @@ async function handle(args, ctx) {
             "local CONFIG.md + cache + trash + backend data (events, skill records, consents, trusted skills, recommendation feedback, share reports)",
         };
       }
-      const deleteResp = await httpCall("DELETE", "/users/data");
+      const deleteResp = await httpCall("DELETE", "/users/data", null, "privacy:delete-all");
       if (deleteResp && deleteResp.error) {
         return {
           intent: "privacy:delete-all",
@@ -180,7 +180,7 @@ async function handle(args, ctx) {
       const resp = await httpCall("POST", "/users/consent", {
         consentVersion: version,
         agreedAt: now,
-      });
+      }, "privacy:consent-agree");
       if (resp && resp.error) {
         return {
           intent: "privacy:consent-agree",

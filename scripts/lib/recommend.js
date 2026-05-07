@@ -150,6 +150,8 @@ async function handleIntent(args) {
   let searchResp = await httpCall(
     "GET",
     `/skills/live-search?query=${encodeURIComponent(keywords)}&limit=${Math.min(OUT_ARR, 5)}`,
+    null,
+    "intent",
   );
 
   // Fallback: when the combined query returns 0 results (common with mixed
@@ -165,6 +167,8 @@ async function handleIntent(args) {
           const fbResp = await httpCall(
             "GET",
             `/skills/live-search?query=${encodeURIComponent(parts[i])}&limit=${Math.min(OUT_ARR, 5)}`,
+            null,
+            "intent",
           );
           if (!fbResp.error) {
             const fbItems = fbResp.results || fbResp.items || [];
@@ -259,7 +263,7 @@ async function handleRecommend(args, ctx) {
     }
   }
 
-  const resp = await httpCall("GET", url);
+  const resp = await httpCall("GET", url, null, "recommend");
   if (resp.error) return resp;
   const rawItems = resp.items || resp.recommendations || [];
   // Normalize slugs: backend may return skillssh: URLs or org/repo/name paths
@@ -302,6 +306,8 @@ async function handleSearch(args) {
   const searchResp = await httpCall(
     "GET",
     `/skills/live-search?query=${encodeURIComponent(query)}&limit=${searchLimit}`,
+    null,
+    "search",
   );
   if (searchResp.error) return searchResp;
   const rawItems = searchResp.results || searchResp.items || [];

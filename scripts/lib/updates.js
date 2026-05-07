@@ -125,7 +125,7 @@ async function handleCheck(_args, ctx) {
       compact: "1",
       limit: String(OUT_ARR),
     });
-    const resp = await httpCall("GET", `/notify/daily-check?${params}`);
+    const resp = await httpCall("GET", `/notify/daily-check?${params}`, null, "update:check");
     if (!resp.error && Array.isArray(resp.alerts)) {
       const baseVersion = installedVer.split("-")[0];
       for (const alert of resp.alerts) {
@@ -174,7 +174,7 @@ async function handleCheck(_args, ctx) {
     const payload = {
       skills: skills.map((s) => ({ id: s.id, version: s.version })),
     };
-    const resp = await httpCall("POST", "/skills/check-updates", payload);
+    const resp = await httpCall("POST", "/skills/check-updates", payload, "update:check");
     if (!resp.error && Array.isArray(resp.results)) {
       for (const r of resp.results) {
         if (!r.hasUpdate) continue;
