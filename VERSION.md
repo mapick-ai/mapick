@@ -2,6 +2,18 @@
 
 All notable changes to Mapick will be documented in this file.
 
+## v1.0.19 - 2026-05-07
+
+### Fixed
+
+- backup:create: stage→rename two-step to prevent trash/ recursion (P0)
+- diagnose/version/doctor: BOM/CR tolerance + _meta.json fallback (P0)
+- consent gate order: declined check before first-use to avoid prompting declined users (P0)
+- security declined: LOCAL_FALLBACK_COMMANDS allows security to fall back to local scan (P0/P1)
+- security input validation: invalid_skill_id now triggers before consent gate (P0/P1)
+- recommend:track: no_active_rec_id and local_only_mode short circuits (P1)
+- bundle:track-installed: ctx.command recognition + REMOTE_COMMANDS registration (P1)
+
 ## v1.0.18 - 2026-05-06
 
 ### Fixed
