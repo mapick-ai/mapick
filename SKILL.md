@@ -164,7 +164,7 @@ If `usageDays < 7` or `totalInvocations < 50` → render the brewing card (do NO
 
 If the `report` response contains `fallback: "local_day1_summary"` or `day1_summary` / `taste_tags`, render those tags immediately. This is the backend-rate-limit / backend-unavailable fallback path: do not stop at the error message, and do not generate HTML. Tell the user the full persona is still brewing, then show the local tags and summary.
 
-Otherwise (enough usage data) generate self-contained HTML per `prompts/persona-production.md`, save only to `/tmp/mapick-report-{id}.html`, then `share <reportId> /tmp/mapick-report-{id}.html <locale>`. Never pass any other local file path to `share`.
+Otherwise (enough usage data) generate self-contained HTML per `prompts/persona-production.md`, save only to `/tmp/mapick-report-{id}.html`. **Do NOT call `share` automatically.** Instead, show the user the generated report and ask: "要分享这个报告吗？" (or equivalent in their language). Only call `share <reportId> /tmp/mapick-report-{id}.html <locale>` after the user explicitly confirms they want to share. Never pass any other local file path to `share`.
 
 Rate limits: report daily quota is temporarily disabled; share remains 10/day per fp. HTML > 200KB → 413, regenerate shorter.
 
