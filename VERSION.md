@@ -2,6 +2,12 @@
 
 All notable changes to Mapick will be documented in this file.
 
+## v1.0.21 - 2026-05-07
+
+### Fixed
+
+- Exclude revisions/ directory from git to avoid ClawHub false positives in security scans
+
 ## v1.0.20 - 2026-05-07
 
 ### Fixed
