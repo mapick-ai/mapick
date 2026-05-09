@@ -4,6 +4,7 @@ const os = require("os");
 const http = require("http");
 const https = require("https");
 const { API_BASE, deviceFp, redactForUpload, isoNow } = require("./core");
+const circuit = require("./circuit");
 
 /**
  * Mapick outbound network manifest. EVERY HTTP request from this Skill
@@ -173,6 +174,12 @@ async function httpCall(method, endpoint, body = null, intent = null) {
     };
   }
 
+  // 熔断检查
+  if (!circuit.allowRequest(endpoint)) {
+    logOutbound({ ts, method, endpoint, blocked: true, reason: "circuit_open" });
+    return circuit.fastFail("circuit_open", "Backend is unreachable. Retry later.");
+  }
+
   const base = API_BASE.replace(/\/$/, "") + "/";
   const url = new URL(endpoint.replace(/^\//, ""), base);
 
@@ -276,6 +283,14 @@ async function httpCall(method, endpoint, body = null, intent = null) {
     if (body && body.action) entry.action = body.action;
     if (redactedPayload) entry.redacted_payload = true;
     logOutbound(entry);
+
+    // 熔断状态更新
+    if (result && (result.error || result.statusCode >= 400)) {
+      const errClass = result.class || classifyFetchError({ message: result.error, cause: {} });
+      circuit.recordFailure(endpoint, errClass, result.statusCode || 0);
+    } else {
+      circuit.recordSuccess(endpoint);
+    }
   }
   return result;
 }
