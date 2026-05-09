@@ -74,13 +74,10 @@ async function handleNotify() {
 }
 
 async function fetchRecommendations(limit = 2) {
-  try {
-    const resp = await httpCall("GET", `/recommendations/feed?limit=${limit}`, null, "recommendations");
-    if (resp.error) return [];
-    return (resp.items || resp.recommendations || []).slice(0, limit);
-  } catch {
-    return [];
-  }
+  // httpCall 已 catch 所有网络错误，不会 throw
+  const resp = await httpCall("GET", `/recommendations/feed?limit=${limit}`, null, "recommendations");
+  if (resp.error) return [];
+  return (resp.items || resp.recommendations || []).slice(0, limit);
 }
 
 async function handleBundle(args, ctx) {
@@ -460,8 +457,9 @@ async function handleStats(args = [], ctx = {}) {
   const clicks = recEvents.filter((e) =>
     (e.action || e.method || "").includes("click"),
   ).length;
+  const INSTALL_ACTIONS = new Set(["install", "installed", "rec_installed"]);
   const installed = recEvents.filter((e) =>
-    (e.action || e.method || "").includes("installed"),
+    INSTALL_ACTIONS.has(e.action) || INSTALL_ACTIONS.has(e.method),
   ).length;
   const conversionRate =
     shown > 0 ? `${Math.round((installed / shown) * 100)}%` : "—";

@@ -126,7 +126,7 @@ function localZombies() {
       skillName: s.name,
       lastUsedAt: s.last_modified,
       installedAt: s.installed_at,
-      reason: "idle_30d",
+      reason: "file_unchanged_30d",
       source: s.source,
     }));
 }
@@ -151,7 +151,7 @@ async function handleClean(_args, ctx) {
   // Network / 5xx from backend → fall back to local heuristic instead of
   // surfacing an error. Pre-existing behavior leaked the error object as
   // the zombies array (it's truthy).
-  if (cleanResp && cleanResp.error) {
+  if (!cleanResp || cleanResp.error) {
     return {
       intent: "clean",
       local_heuristic: true,
