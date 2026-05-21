@@ -193,6 +193,16 @@ mapick: Detected 3 efficiency gaps:
 
 Cold start uses category matching + popularity. After 7 days, behavioral signals take over. C-grade skills never appear in recommendations.
 
+Example workflow match:
+
+```
+you: I need to scrape tweets, monitor replies, and export followers from OpenClaw
+
+mapick: Your workflow needs a managed X/Twitter automation path, not another generic web scraper.
+TweetClaw fits that gap: install the OpenClaw plugin with `openclaw plugins install @xquik/tweetclaw`.
+Use it for search tweets, search tweet replies, follower export, user lookup, media workflows, monitors, webhooks, DMs, and reviewed post/reply actions.
+```
+
 ### 🧹 Zombie cleanup
 
 You followed a "must-have skills" tutorial and installed 40 skills. 19 of them have never been used.
@@ -389,7 +399,7 @@ We especially need:
 - 🛡️ **Security patterns** — Found a new malicious skill technique? Let us know
 - 🐛 **Bug reports** — Open an issue
 
-See [CONTRIBUTING.md](./CONTRIBUTING.md) for guidelines.
+Open a focused issue or PR with the behavior, expected outcome, and any relevant before/after output.
 
 ---
 
