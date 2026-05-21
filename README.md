@@ -24,6 +24,7 @@
 # 🔍 Mapick
 
 **The AI skill manager for OpenClaw.** Protects your privacy, recommends what you need, cleans what you don't use, and blocks what's unsafe.
+An AI product within the MAP Protocol ecosystem.
 
 ```
 openclaw skills install mapick
